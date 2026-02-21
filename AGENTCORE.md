@@ -1365,7 +1365,7 @@ Fixes 3 critical/medium issues identified from production failures: "Bad file de
 - When detected, auditor forces `retry_count = MAX_RETRIES` (skips to delivery) instead of wasting 9 API calls on code-level retries
 - User gets a clear "ENVIRONMENT ERROR" message via the fallback response path
 
-**New tests (28 new, 326 total):**
+**New tests (28 new, 336 total):**
 - `tests/test_sandbox.py` — 2 new: stdin-safe run_code, stdin-safe run_shell
 - `tests/test_auditor.py` — 10 new: bad file descriptor, sys streams, no space, DNS failure, permission denied NOT detected (false-positive guard), connection refused NOT detected (false-positive guard), code errors not detected, import errors not detected, empty result, env error forces max retries
 - `tests/test_executor.py` — 16 new: _parse_import_error_from_result (12 tests covering mapped modules, canonical PIP_MAP reuse, traceback vs stderr precedence, empty/no-match cases), _bootstrap_project_deps (4 tests covering no requirements, success, failure, venv pip)
@@ -1375,7 +1375,7 @@ Fixes 3 critical/medium issues identified from production failures: "Bad file de
 - `brain/nodes/executor.py` — dependency bootstrapping, auto-install retry, prompt hardening, imports `_PIP_NAME_MAP` from sandbox (single source of truth)
 - `brain/nodes/auditor.py` — environment error detection and retry short-circuit; "Permission denied" and "Connection refused" removed (false-positive risk)
 
-**Test suite:** 326 tests (316 passed + 10 skipped). 10 skipped tests require Docker Desktop.
+**Test suite:** 336 tests (326 passed + 10 skipped). 10 skipped tests require Docker Desktop.
 
 ### v6.10 - 2026-02-21 - Pipeline Audit Fixes & Operational Hardening
 

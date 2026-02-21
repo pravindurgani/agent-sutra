@@ -1,0 +1,15 @@
+# AgentCore Project Registry
+# ──────────────────────────
+# Register your projects here so the agent can interact with them.
+# See projects.yaml.example for detailed examples and field descriptions.
+#
+# Quick reference:
+#   name:         Human-readable name
+#   path:         Absolute path to the project root
+#   description:  What it does + how to run it (Claude reads this)
+#   commands:     Named shell commands the agent can invoke
+#   timeout:      Max execution time in seconds (default: 60)
+#   requires_file: Set true if the project needs a file upload to work
+#   triggers:     Keywords that match this project (case-insensitive)
+
+projects: []

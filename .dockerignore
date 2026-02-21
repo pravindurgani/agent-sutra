@@ -1,0 +1,10 @@
+.env
+*.db
+workspace/
+storage/
+__pycache__/
+.pytest_cache/
+*.pyc
+.git/
+backups/
+*.log

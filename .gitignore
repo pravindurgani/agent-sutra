@@ -1,0 +1,57 @@
+# Environment & secrets
+.env
+*.env.local
+.env.*.local
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+venv/
+.venv/
+env/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Runtime artifacts
+*.log
+agentcore.log
+launchd_stdout.log
+launchd_stderr.log
+maintenance.log
+
+# Workspace (generated files and user data)
+workspace/outputs/
+workspace/uploads/
+workspace/projects/
+workspace/.pip-cache/
+
+# Test data (local testing artifacts)
+telegram_test/
+
+# Deployment-specific (personal paths)
+projects_macmini.yaml
+
+# IDE & editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Backups
+backups/

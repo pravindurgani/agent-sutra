@@ -1,0 +1,77 @@
+# AgentCore Project Registry
+# ──────────────────────────
+# This file tells the agent about your existing projects.
+# Copy to projects.yaml and update paths to match your system.
+#
+# Each project needs:
+#   name:         Human-readable name
+#   path:         Absolute path to the project root
+#   description:  What it does + how to run it (Claude reads this)
+#   commands:     Named shell commands the agent can invoke
+#   timeout:      Max execution time in seconds (default: 60)
+#   requires_file: Set true if the project needs a file upload to work
+#   triggers:     Keywords that match this project (case-insensitive)
+
+projects:
+
+  # Example 1: A web scraping project
+  - name: "Job Scraper"
+    path: "/Users/yourname/projects/job_scraper"
+    description: |
+      Automated scraping system monitoring career pages. Maintains a
+      SQLite database with job lifecycle tracking. Uses Playwright for
+      JavaScript-rendered pages. Output is XLSX with new and removed jobs.
+      Typical runtime ~14 minutes for 70+ sources.
+    commands:
+      scrape: "python3 -m scraper scrape --all --workers 5"
+      scrape_one: "python3 -m scraper scrape --slug {slug}"
+      export: "python3 -m scraper export"
+      stats: "python3 -m scraper stats"
+      full: "python3 -m scraper scrape --all --workers 5 && python3 -m scraper export"
+    timeout: 900
+    requires_file: false
+    triggers:
+      - "job scraper"
+      - "scrape jobs"
+      - "scrape careers"
+      - "job listings"
+
+  # Example 2: A data analysis pipeline
+  - name: "Data Analysis Pipeline"
+    path: "/Users/yourname/projects/data_pipeline"
+    description: |
+      End-to-end data pipeline processing raw XLSX files into structured
+      datasets. Multi-stage cleaning: deduplication, field normalisation,
+      location parsing. AI-powered classification using Ollama or Claude.
+      Input: Excel file with raw data sheets.
+      Output: Cleaned CSV and styled Excel report.
+      Run with: streamlit run app.py (web UI) or python3 -m pipeline --input <file>
+    commands:
+      app: "streamlit run app.py"
+      clean: "python3 -m pipeline --input {file}"
+    timeout: 300
+    requires_file: true
+    triggers:
+      - "clean data"
+      - "data analysis"
+      - "data pipeline"
+      - "process data"
+
+  # Example 3: A full-stack web app
+  - name: "Budget Forecaster"
+    path: "/Users/yourname/projects/budget-app"
+    description: |
+      Full-stack SaaS application with Next.js frontend and FastAPI backend.
+      Frontend: cd frontend && npm run dev (port 3000)
+      Backend: cd backend && uvicorn app.main:app --reload (port 8000)
+    commands:
+      frontend_dev: "cd frontend && npm install && npm run dev"
+      frontend_build: "cd frontend && npm run build"
+      backend_dev: "cd backend && uvicorn app.main:app --reload"
+      backend_test: "cd backend && pytest"
+    timeout: 120
+    requires_file: false
+    triggers:
+      - "budget"
+      - "forecast"
+      - "web app"

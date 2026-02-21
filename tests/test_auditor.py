@@ -1,4 +1,4 @@
-"""Tests for brain/nodes/auditor.py — JSON extraction with edge cases."""
+"""Tests for brain/nodes/auditor.py — JSON extraction and environment error detection."""
 from __future__ import annotations
 
 import sys
@@ -6,7 +6,7 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from brain.nodes.auditor import _extract_json
+from brain.nodes.auditor import _extract_json, _detect_environment_error
 
 
 class TestExtractJson:
@@ -82,3 +82,71 @@ class TestExtractJson:
         result = _extract_json(text)
         # This contains "verdict" but isn't valid JSON — should return None
         assert result is None
+
+
+# ── Environment error detection (v6.11) ───────────────────────────
+
+
+class TestEnvironmentErrorDetection:
+    """Auditor should short-circuit retries on environment errors."""
+
+    def test_bad_file_descriptor_detected(self):
+        result = (
+            "Execution: FAILED (exit code 1)\nStderr:\n"
+            "Fatal Python error: init_sys_streams\n"
+            "Can't initialize sys standard streams\n"
+            "OSError: [Errno 9] Bad file descriptor"
+        )
+        assert _detect_environment_error(result) is not None
+
+    def test_sys_streams_detected(self):
+        result = "Execution: FAILED\nStderr:\ncan't initialize sys standard streams"
+        desc = _detect_environment_error(result)
+        assert desc is not None
+        assert "daemon" in desc.lower() or "stdin" in desc.lower()
+
+    def test_permission_denied_detected(self):
+        result = "Execution: FAILED\nStderr:\nPermission denied: /private/var/output"
+        assert _detect_environment_error(result) is not None
+
+    def test_no_space_detected(self):
+        result = "Execution: FAILED\nStderr:\nNo space left on device"
+        assert _detect_environment_error(result) is not None
+
+    def test_dns_failure_detected(self):
+        result = "Execution: FAILED\nStderr:\nName or service not known"
+        assert _detect_environment_error(result) is not None
+
+    def test_connection_refused_detected(self):
+        result = "Execution: FAILED\nStderr:\nConnection refused"
+        assert _detect_environment_error(result) is not None
+
+    def test_code_error_not_detected(self):
+        result = "Execution: FAILED (exit code 1)\nTraceback:\nZeroDivisionError: division by zero"
+        assert _detect_environment_error(result) is None
+
+    def test_import_error_not_detected(self):
+        result = "Execution: FAILED\nTraceback:\nModuleNotFoundError: No module named 'pandas'"
+        assert _detect_environment_error(result) is None
+
+    def test_empty_result_not_detected(self):
+        assert _detect_environment_error("") is None
+        assert _detect_environment_error(None) is None
+
+    def test_env_error_forces_max_retries(self):
+        """Environment errors should set retry_count to MAX_RETRIES."""
+        from brain.nodes.auditor import audit
+        import config
+        state = {
+            "task_id": "test-env",
+            "message": "test",
+            "task_type": "code",
+            "plan": "test plan",
+            "code": "print('hello')",
+            "execution_result": "Execution: FAILED\nStderr:\ncan't initialize sys standard streams",
+            "retry_count": 0,
+        }
+        # This should NOT call the Claude API — it should short-circuit
+        result = audit(state)
+        assert result["retry_count"] >= config.MAX_RETRIES
+        assert "ENVIRONMENT ERROR" in result["audit_feedback"]

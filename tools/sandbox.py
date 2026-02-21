@@ -186,7 +186,7 @@ def _docker_available() -> bool:
 
     try:
         result = subprocess.run(
-            ["docker", "info"], capture_output=True, timeout=5,
+            ["docker", "info"], stdin=subprocess.DEVNULL, capture_output=True, timeout=5,
         )
         if result.returncode != 0:
             _docker_status.update(available=False, checked_at=now)
@@ -195,7 +195,7 @@ def _docker_available() -> bool:
 
         result = subprocess.run(
             ["docker", "image", "inspect", config.DOCKER_IMAGE],
-            capture_output=True, timeout=5,
+            stdin=subprocess.DEVNULL, capture_output=True, timeout=5,
         )
         if result.returncode != 0:
             _docker_status.update(available=False, checked_at=now)
@@ -316,7 +316,7 @@ def _run_code_docker(
         )
 
         result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout,
+            cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout,
         )
 
         new_files = []
@@ -355,14 +355,14 @@ def _run_code_docker(
             "Docker execution timed out after %ds, killing container %s",
             timeout, container_name,
         )
-        subprocess.run(["docker", "kill", container_name], capture_output=True, timeout=5)
-        subprocess.run(["docker", "rm", "-f", container_name], capture_output=True, timeout=5)
+        subprocess.run(["docker", "kill", container_name], stdin=subprocess.DEVNULL, capture_output=True, timeout=5)
+        subprocess.run(["docker", "rm", "-f", container_name], stdin=subprocess.DEVNULL, capture_output=True, timeout=5)
         return ExecutionResult(
             success=False, stderr=f"Execution timed out after {timeout}s", timed_out=True,
         )
     except Exception as e:
         logger.error("Docker execution error: %s", e)
-        subprocess.run(["docker", "rm", "-f", container_name], capture_output=True, timeout=5)
+        subprocess.run(["docker", "rm", "-f", container_name], stdin=subprocess.DEVNULL, capture_output=True, timeout=5)
         return ExecutionResult(success=False, stderr=str(e))
     finally:
         if script_path is not None and script_path.exists():
@@ -389,7 +389,7 @@ def _docker_pip_install(package: str) -> ExecutionResult:
         ]
 
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            result = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=120)
             return ExecutionResult(
                 success=result.returncode == 0,
                 stdout=result.stdout[:10000],
@@ -397,8 +397,8 @@ def _docker_pip_install(package: str) -> ExecutionResult:
                 return_code=result.returncode,
             )
         except subprocess.TimeoutExpired:
-            subprocess.run(["docker", "kill", container_name], capture_output=True, timeout=5)
-            subprocess.run(["docker", "rm", "-f", container_name], capture_output=True, timeout=5)
+            subprocess.run(["docker", "kill", container_name], stdin=subprocess.DEVNULL, capture_output=True, timeout=5)
+            subprocess.run(["docker", "rm", "-f", container_name], stdin=subprocess.DEVNULL, capture_output=True, timeout=5)
             return ExecutionResult(success=False, stderr="pip install timed out", timed_out=True)
         except Exception as e:
             return ExecutionResult(success=False, stderr=str(e))
@@ -667,7 +667,7 @@ def run_code(
 
         # Use start_new_session so we can kill the entire process group on timeout
         proc = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, cwd=working_dir, env=env, start_new_session=True,
         )
         try:
@@ -834,7 +834,8 @@ def run_shell(
     try:
         # Use start_new_session so we can kill the entire process group on timeout
         proc = subprocess.Popen(
-            full_command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            full_command, shell=True, stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, cwd=working_dir, env=env, start_new_session=True,
         )
         try:

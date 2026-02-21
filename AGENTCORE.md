@@ -1,6 +1,6 @@
-# AgentCore v6.10 - Complete Project Documentation
+# AgentCore v6.11 - Complete Project Documentation
 
-A Telegram-driven AI agent server running on Mac Mini M2 (16GB). Receives tasks via Telegram, processes them through a LangGraph Plan-Execute-Audit pipeline powered by Claude API, and delivers results back. Features: project registry, cross-model adversarial auditing (Sonnet+Opus), full internet access, local AI orchestration (Ollama), big data processing, production frontend generation, Docker container isolation for code execution, 7 task types, 11 commands, budget enforcement, RAM guards, code content scanner, 34-pattern command blocklist, and 298 automated tests.
+A Telegram-driven AI agent server running on Mac Mini M2 (16GB). Receives tasks via Telegram, processes them through a LangGraph Plan-Execute-Audit pipeline powered by Claude API, and delivers results back. Features: project registry, cross-model adversarial auditing (Sonnet+Opus), full internet access, local AI orchestration (Ollama), big data processing, production frontend generation, Docker container isolation for code execution, 7 task types, 11 commands, budget enforcement, RAM guards, code content scanner, 34-pattern command blocklist, environment error detection, project dependency bootstrapping, and 310 automated tests.
 
 **Last updated:** 2026-02-21
 
@@ -1343,6 +1343,39 @@ AgentCore was independently stress-tested using a 4-category evaluation protocol
 
 ## Changelog
 
+### v6.11 - 2026-02-21 - Sandbox & Project Execution Fixes
+
+Fixes 3 critical/medium issues identified from production failures: "Bad file descriptor" errors killing all code tasks when running as a daemon, missing dependency management for project tasks, and wasted API credits from retrying environment errors.
+
+**stdin=subprocess.DEVNULL on all subprocess calls (sandbox.py):**
+- Added `stdin=subprocess.DEVNULL` to every `subprocess.Popen` and `subprocess.run` call
+- Fixes "Fatal Python error: init_sys_streams / Bad file descriptor" when AgentCore runs as a background service (launchd, nohup)
+- Affected: `run_code()`, `run_shell()`, `_run_code_docker()`, `_docker_pip_install()`, `_docker_available()`, all docker kill/rm calls
+- Child processes no longer inherit invalid fd 0 from daemon parent
+
+**Project dependency bootstrapping (executor.py):**
+- New `_bootstrap_project_deps()` installs requirements.txt before first project execution
+- Only runs on first attempt (retry_count == 0) to avoid redundant installs
+- New `_parse_import_error_from_result()` + auto-install retry for project tasks (mirrors `run_code_with_auto_install` pattern)
+- If a project script fails with ImportError, the missing package is auto-installed and execution retried
+- Strengthened `SHELL_GEN_SYSTEM` prompt: Claude must use ONLY the provided commands, cannot discover/guess alternative entry points
+
+**Environment error short-circuit in auditor (auditor.py):**
+- New `_detect_environment_error()` identifies 6 infrastructure failure patterns: Bad file descriptor, sys streams init failure, Permission denied, No space left, DNS failure, Connection refused
+- When detected, auditor forces `retry_count = MAX_RETRIES` (skips to delivery) instead of wasting 9 API calls on code-level retries
+- User gets a clear "ENVIRONMENT ERROR" message via the fallback response path
+
+**New tests (12 new, 310 total):**
+- `tests/test_sandbox.py` — 2 new: stdin-safe run_code, stdin-safe run_shell
+- `tests/test_auditor.py` — 10 new: bad file descriptor detection, sys streams detection, permission denied, no space, DNS failure, connection refused, code errors not false-positive, import errors not false-positive, empty result, env error forces max retries
+
+**Modified files:**
+- `tools/sandbox.py` — `stdin=subprocess.DEVNULL` on all 11 subprocess calls
+- `brain/nodes/executor.py` — dependency bootstrapping, auto-install retry, prompt hardening
+- `brain/nodes/auditor.py` — environment error detection and retry short-circuit
+
+**Test suite:** 310 tests (300 passed + 10 skipped). 10 skipped tests require Docker Desktop.
+
 ### v6.10 - 2026-02-21 - Pipeline Audit Fixes & Operational Hardening
 
 Addresses 11 issues identified during a comprehensive read-only pipeline audit. Focuses on timeout safety, error sanitization, upload preservation, race condition elimination, and storage management.
@@ -1411,7 +1444,7 @@ Addresses 11 issues identified during a comprehensive read-only pipeline audit. 
 - `storage/db.py` — tasks table pruning in `prune_old_data()`
 - `config.py` — `API_MAX_RETRIES`, section reorganization
 
-**Test suite:** 308 tests (298 passed + 10 skipped). 10 skipped tests require Docker Desktop.
+**Test suite (at time of release):** 308 tests (298 passed + 10 skipped). 10 skipped tests require Docker Desktop.
 
 ### v6.9 - 2026-02-21 - Comprehensive Artifact Filtering & Delivery Resilience
 

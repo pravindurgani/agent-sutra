@@ -121,6 +121,21 @@ def audit(state: AgentState) -> dict:
     """
     task_type = state.get("task_type", "code")
 
+    # Short-circuit: detect environment errors that retries cannot fix.
+    # These are sandbox/infrastructure failures, not code logic errors.
+    execution_result = state.get("execution_result", "")
+    env_error = _detect_environment_error(execution_result)
+    if env_error:
+        logger.warning(
+            "Environment error detected for task %s, skipping code-level retry: %s",
+            state["task_id"], env_error,
+        )
+        return {
+            "audit_verdict": "fail",
+            "audit_feedback": f"ENVIRONMENT ERROR (not a code issue, retrying will not help): {env_error}",
+            "retry_count": config.MAX_RETRIES,  # Force skip to delivery
+        }
+
     # Select task-type-specific audit criteria
     criteria = AUDIT_CRITERIA.get(task_type, AUDIT_CRITERIA["code"])
     system = SYSTEM_BASE + "\n" + criteria
@@ -220,4 +235,34 @@ def _extract_json(text: str) -> dict | None:
                 # Stray closing brace — reset to avoid poisoning subsequent parsing
                 depth = 0
                 start = -1
+    return None
+
+
+# ── Environment error detection ───────────────────────────────────
+
+# Patterns that indicate environment/infrastructure failures (not code bugs)
+_ENV_ERROR_PATTERNS = [
+    # Python can't start due to invalid file descriptors
+    ("can't initialize sys standard streams", "Python stdin/stdout initialisation failed (daemon context)"),
+    ("Bad file descriptor", "Invalid file descriptor inherited from parent process"),
+    # Sandbox execution failures
+    ("Permission denied", "Filesystem permission error in sandbox"),
+    ("No space left on device", "Disk full"),
+    # Network unreachable in sandbox
+    ("Name or service not known", "DNS resolution failed (no network access)"),
+    ("Connection refused", "Target service not running"),
+]
+
+
+def _detect_environment_error(execution_result: str) -> str | None:
+    """Detect environment/infrastructure errors that code retries cannot fix.
+
+    Returns a human-readable description of the environment error, or None
+    if the failure appears to be a code logic issue (suitable for retry).
+    """
+    if not execution_result:
+        return None
+    for pattern, description in _ENV_ERROR_PATTERNS:
+        if pattern in execution_result:
+            return description
     return None

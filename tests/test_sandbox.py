@@ -947,3 +947,30 @@ class TestStdoutFallback:
         result = _extract_paths_from_stdout(stdout, tmp_path)
         assert str(real) in result
         assert len(result) == 1
+
+
+# ── stdin=DEVNULL (v6.11) ─────────────────────────────────────────
+
+
+class TestStdinDevNull:
+    """Subprocess calls must set stdin=DEVNULL to work in daemon contexts."""
+
+    def test_run_code_sets_devnull_stdin(self):
+        """run_code() should work even when parent stdin is invalid."""
+        from tools.sandbox import run_code
+        result = run_code("print('stdin-safe')", language="python", timeout=10)
+        assert result.success
+        assert "stdin-safe" in result.stdout
+
+    def test_run_shell_sets_devnull_stdin(self):
+        """run_shell() should work even when parent stdin is invalid."""
+        from tools.sandbox import run_shell
+        import tempfile
+        d = Path(tempfile.mkdtemp(dir=config.HOST_HOME / "Desktop"))
+        try:
+            result = run_shell("echo 'shell-stdin-safe'", working_dir=d, timeout=10)
+            assert result.success
+            assert "shell-stdin-safe" in result.stdout
+        finally:
+            import shutil
+            shutil.rmtree(d, ignore_errors=True)

@@ -59,11 +59,16 @@ Given a plan that references existing project commands, write a bash script that
 - Captures and prints output/results
 - Handles errors (exit on first failure)
 
-CRITICAL: All parameters like {file}, {client}, etc. MUST be replaced with actual values.
-Do NOT leave any {placeholder} syntax in the script. Use the extracted parameter values.
+CRITICAL RULES:
+1. All parameters like {file}, {client}, etc. MUST be replaced with actual values.
+   Do NOT leave any {placeholder} syntax in the script.
+2. Use ONLY the commands provided in "Commands with parameters filled in" below.
+   Do NOT discover, guess, or invent other entry points or scripts in the project directory.
+   Do NOT use ls, find, or grep to locate alternative scripts.
+   The provided commands are the ONLY correct way to invoke this project.
+3. Do NOT install packages or write new Python code.
 
-Write ONLY the bash script. Start with #!/bin/bash and set -e.
-Do NOT install packages or write new Python code. Use the project's existing commands."""
+Write ONLY the bash script. Start with #!/bin/bash and set -e."""
 
 UI_DESIGN_SYSTEM_EXEC = """You are an expert front-end developer creating production-quality UI designs.
 
@@ -163,6 +168,50 @@ Respond with ONLY valid JSON, e.g.: {{"client": "Light & Wonder", "file": "/path
     return fallback
 
 
+def _bootstrap_project_deps(project_path: str, venv_path: str | None = None) -> str | None:
+    """Install project dependencies before execution.
+
+    Checks for requirements.txt in the project directory and installs
+    dependencies using the project's venv (if configured) or system pip.
+    Returns error message on failure, None on success.
+    """
+    req_file = Path(project_path) / "requirements.txt"
+    if not req_file.exists():
+        return None  # No requirements file — nothing to bootstrap
+
+    pip_bin = f"{venv_path}/bin/pip" if venv_path else "pip3"
+
+    logger.info("Bootstrapping project dependencies from %s", req_file)
+    result = run_shell(
+        f"{pip_bin} install -r {req_file} --quiet",
+        working_dir=project_path,
+        timeout=120,
+        venv_path=venv_path,
+    )
+
+    if not result.success:
+        logger.warning("Dependency bootstrap failed: %s", result.stderr[:300])
+        return f"Failed to install dependencies: {result.stderr[:200]}"
+
+    logger.info("Dependencies installed successfully")
+    return None
+
+
+def _parse_import_error_from_result(result: ExecutionResult) -> str | None:
+    """Extract missing module from a failed execution result."""
+    error_text = result.traceback or result.stderr or ""
+    if not error_text:
+        return None
+    match = re.search(r"(?:ModuleNotFoundError|ImportError): No module named '(\w+)'", error_text)
+    if not match:
+        return None
+    module = match.group(1)
+    PIP_MAP = {"PIL": "Pillow", "cv2": "opencv-python", "bs4": "beautifulsoup4",
+               "yaml": "pyyaml", "sklearn": "scikit-learn", "dateutil": "python-dateutil",
+               "dotenv": "python-dotenv"}
+    return PIP_MAP.get(module, module)
+
+
 def _execute_project(state: AgentState) -> dict:
     """Execute an existing project's commands."""
     project = state.get("project_config", {})
@@ -194,6 +243,13 @@ def _execute_project(state: AgentState) -> dict:
 
     timeout = project.get("timeout", 300)
     venv = project.get("venv")
+
+    # Bootstrap dependencies before first execution
+    if state.get("retry_count", 0) == 0:
+        dep_error = _bootstrap_project_deps(project_path, venv)
+        if dep_error:
+            logger.warning("Dependency bootstrap failed for %s: %s", project.get("name"), dep_error)
+            # Don't abort — the project might still work if deps are already installed
 
     # Extract parameters BEFORE generating the shell script
     params = _extract_params(state)
@@ -246,6 +302,27 @@ IMPORTANT: Use the filled-in commands above. Do NOT leave {{file}} or {{client}}
         timeout=timeout,
         venv_path=venv,
     )
+
+    # Auto-install on ImportError (mirrors run_code_with_auto_install behaviour)
+    if not result.success:
+        missing = _parse_import_error_from_result(result)
+        if missing:
+            logger.info("Project missing module '%s', attempting auto-install", missing)
+            pip_bin = f"{venv}/bin/pip" if venv else "pip3"
+            install_result = run_shell(
+                f"{pip_bin} install {missing}",
+                working_dir=project_path,
+                timeout=120,
+                venv_path=venv,
+            )
+            if install_result.success:
+                logger.info("Auto-installed %s, retrying project execution", missing)
+                result = run_shell(
+                    command=f"bash -e /dev/stdin <<'{delimiter}'\n{code}\n{delimiter}",
+                    working_dir=project_path,
+                    timeout=timeout,
+                    venv_path=venv,
+                )
 
     # For project tasks, filter excessive artifacts (likely venv/package leak)
     artifacts = result.files_created

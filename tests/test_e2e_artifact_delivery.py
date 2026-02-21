@@ -197,6 +197,57 @@ class TestRealisticProjectExecution:
         finally:
             _cleanup(d)
 
+    def test_venv_files_never_detected_as_artifacts(self):
+        """If a script creates a venv during execution, venv files are excluded."""
+        d = _make_project_dir()
+        try:
+            code = (
+                "import venv, os\n"
+                "venv.create('venv', with_pip=False)\n"
+                "os.makedirs('app/output', exist_ok=True)\n"
+                "with open('app/output/Report.html', 'w') as f:\n"
+                "    f.write('<html>report</html>')\n"
+                "print('Report.html created')\n"
+            )
+            result = run_code(code, "python", working_dir=d, timeout=30)
+            assert result.success, f"Execution failed: {result.stderr}"
+            names = [Path(f).name for f in result.files_created]
+            assert "Report.html" in names, f"Report missing: {names}"
+            # Venv infrastructure must NOT appear
+            assert "pyvenv.cfg" not in names, f"pyvenv.cfg leaked: {names}"
+            assert "activate" not in names, f"activate leaked: {names}"
+            assert "activate.fish" not in names, f"activate.fish leaked: {names}"
+            assert "activate.csh" not in names, f"activate.csh leaked: {names}"
+        finally:
+            _cleanup(d)
+
+    def test_pip_metadata_never_detected_as_artifacts(self):
+        """Files inside .dist-info directories are never detected as artifacts."""
+        d = _make_project_dir()
+        try:
+            code = (
+                "import os\n"
+                "# Simulate pip creating dist-info during install\n"
+                "os.makedirs('typing_extensions-4.9.0.dist-info', exist_ok=True)\n"
+                "with open('typing_extensions-4.9.0.dist-info/RECORD', 'w') as f:\n"
+                "    f.write('record data')\n"
+                "with open('typing_extensions-4.9.0.dist-info/WHEEL', 'w') as f:\n"
+                "    f.write('wheel data')\n"
+                "with open('typing_extensions-4.9.0.dist-info/METADATA', 'w') as f:\n"
+                "    f.write('metadata')\n"
+                "with open('app/output/Data.csv', 'w') as f:\n"
+                "    f.write('a,b,c')\n"
+            )
+            result = run_code(code, "python", working_dir=d, timeout=15)
+            assert result.success
+            names = [Path(f).name for f in result.files_created]
+            assert "Data.csv" in names, f"Data.csv missing: {names}"
+            assert "RECORD" not in names, f"RECORD leaked: {names}"
+            assert "WHEEL" not in names, f"WHEEL leaked: {names}"
+            assert "METADATA" not in names, f"METADATA leaked: {names}"
+        finally:
+            _cleanup(d)
+
     def test_preexisting_pyc_and_ds_store_never_leak(self):
         """Even if .pyc and .DS_Store are modified during execution, they're filtered."""
         d = _make_project_dir()

@@ -1,4 +1,4 @@
-# AgentCore v6.8 - Complete Project Documentation
+# AgentCore v6.9 - Complete Project Documentation
 
 A Telegram-driven AI agent server running on Mac Mini M2 (16GB). Receives tasks via Telegram, processes them through a LangGraph Plan-Execute-Audit pipeline powered by Claude API, and delivers results back. Features: project registry, cross-model adversarial auditing (Sonnet+Opus), full internet access, local AI orchestration (Ollama), big data processing, production frontend generation, Docker container isolation for code execution, 7 task types, 11 commands, budget enforcement, RAM guards, code content scanner, 34-pattern command blocklist, and 258 automated tests.
 
@@ -1334,12 +1334,42 @@ AgentCore was independently stress-tested using a 4-category evaluation protocol
 |----------|--------|-------|
 | Orchestration | 9.5/10 | Complex scientific math + multi-source data retrieval |
 | Safety | 9.0/10 | Refusal logic robust; adversarial audit (Opus) caught high-risk patterns |
-| Code Maturity | 9.2/10 | 258 tests + comprehensive documentation = production-ready |
+| Code Maturity | 9.2/10 | 287 tests + comprehensive documentation = production-ready |
 | Innovation | 8.5/10 | Adversarial Audit + God Mode focus is a distinct, valuable niche |
 
 ---
 
 ## Changelog
+
+### v6.9 - 2026-02-21 - Comprehensive Artifact Filtering & Delivery Resilience
+
+Fixes a critical production bug where venv/pip infrastructure files (pyvenv.cfg, activate, pip3, RECORD, WHEEL, greenlet.h, typing_extensions.py, etc.) were incorrectly delivered as task artifacts instead of actual report files. Root cause: `_is_artifact_file()` only excluded `.pyc`, `.pyo`, `__pycache__`, `.DS_Store` — insufficient for `pip install` or venv creation during execution.
+
+**Artifact filtering rewrite (sandbox.py — 5 interconnected fixes):**
+- **Comprehensive `_is_artifact_file()`**: Rewrote with 3-layer exclusion: `_EXCLUDED_DIR_NAMES` (20+ dirs: `.venv`, `venv`, `env`, `site-packages`, `node_modules`, `__pycache__`, `.git`, etc.), `_EXCLUDED_FILENAMES` (30+ files: `pyvenv.cfg`, `activate*`, `pip*`, `RECORD`, `WHEEL`, `METADATA`, etc.), `_EXCLUDED_EXTENSIONS` (12: `.pyc`, `.so`, `.dylib`, `.h`, `.whl`, etc.)
+- **Directory-pruning walker `_walk_artifacts()`**: Replaces all 6 `rglob("*")` calls. Uses `os.walk()` with in-place directory pruning — skips entire `.venv/`, `site-packages/`, `node_modules/`, `*.dist-info/` trees instead of scanning thousands of files. Also skips empty files (0 bytes).
+- **Sanity check `_apply_artifact_sanity_check()`**: If >20 artifacts detected after filtering, falls back to known output extensions only (`.html`, `.pdf`, `.csv`, `.xlsx`, etc.). Safety net for edge cases where directory exclusions are insufficient.
+
+**Delivery resilience (handlers.py):**
+- **Empty file skip**: Files with `st_size == 0` are skipped with a warning instead of causing "File must be non-empty" Telegram API crash
+- **Error-resilient send loop**: Each `reply_document()` wrapped in try/except — one failed send no longer kills delivery of remaining files
+- **sent_count tracking**: Logs error if no artifacts were successfully sent despite artifacts being detected
+- Applied to both `handle_message()` and `_scheduled_task_run()`
+
+**Project-level filtering (executor.py):**
+- **`_execute_project()` artifact cap**: If project task returns >15 artifacts, filters to known output extensions only. Defense-in-depth for project tasks that run `pip install` as part of execution.
+
+**New tests (32 new, 297 total):**
+- `tests/test_sandbox.py` — 20 new: `_is_artifact_file` venv/infrastructure exclusions (pyvenv.cfg, activate*, pip*, RECORD, WHEEL, .h, .so, .dist-info, .egg-info, node_modules, .dylib, .whl), `_walk_artifacts` directory pruning (venv, node_modules, dist-info, empty files, __pycache__, site-packages), `_apply_artifact_sanity_check` threshold behavior (3 tests)
+- `tests/test_handlers.py` — 2 new: empty file skip in scheduled delivery, send failure continues to next artifact
+- `tests/test_e2e_artifact_delivery.py` — 2 new: venv creation during execution excludes all venv files, pip dist-info directories excluded
+
+**Modified files:**
+- `tools/sandbox.py` — `_EXCLUDED_DIR_NAMES`, `_EXCLUDED_FILENAMES`, `_EXCLUDED_EXTENSIONS`, rewritten `_is_artifact_file()`, new `_walk_artifacts()`, new `_apply_artifact_sanity_check()`, replaced 6 `rglob("*")` calls
+- `bot/handlers.py` — empty file check, try/except around send_document, sent_count tracking
+- `brain/nodes/executor.py` — artifact count filtering in `_execute_project()`
+
+**Test suite:** 297 tests (287 passed + 10 skipped). 10 skipped tests require Docker Desktop.
 
 ### v6.8 - 2026-02-21 - Artifact Delivery Fix & Parameter Extraction
 

@@ -470,11 +470,19 @@ async def _scheduled_task_run(chat_id: int, user_id: int, task_message: str):
                 p = Path(fpath)
                 if not p.is_file():
                     logger.warning("Scheduled artifact not found, skipping: %s", fpath)
-                elif p.stat().st_size >= config.MAX_FILE_SIZE_BYTES:
-                    logger.warning("Scheduled artifact too large (%d bytes), skipping: %s", p.stat().st_size, fpath)
-                else:
+                    continue
+                file_size = p.stat().st_size
+                if file_size == 0:
+                    logger.warning("Scheduled artifact is empty, skipping: %s", fpath)
+                    continue
+                if file_size >= config.MAX_FILE_SIZE_BYTES:
+                    logger.warning("Scheduled artifact too large, skipping: %s", fpath)
+                    continue
+                try:
                     with open(p, "rb") as f:
                         await bot.send_document(chat_id=chat_id, document=f, filename=p.name)
+                except Exception as send_err:
+                    logger.warning("Failed to send scheduled artifact %s: %s", p.name, send_err)
 
             await db.update_task(tid, status="completed", result=response,
                                 completed_at=datetime.now(timezone.utc).isoformat())
@@ -593,8 +601,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as ctx_err:
             logger.warning("Failed to save conversation context: %s", ctx_err)
 
-        # Send artifact files (deduplicated)
+        # Send artifact files (deduplicated, validated, error-resilient)
         seen_paths = set()
+        sent_count = 0
         for fpath in result.get("artifacts", []):
             if fpath in seen_paths:
                 continue
@@ -602,11 +611,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             p = Path(fpath)
             if not p.is_file():
                 logger.warning("Artifact not found, skipping: %s", fpath)
-            elif p.stat().st_size >= config.MAX_FILE_SIZE_BYTES:
-                logger.warning("Artifact too large (%d bytes), skipping: %s", p.stat().st_size, fpath)
-            else:
+                continue
+            file_size = p.stat().st_size
+            if file_size == 0:
+                logger.warning("Artifact is empty (0 bytes), skipping: %s", fpath)
+                continue
+            if file_size >= config.MAX_FILE_SIZE_BYTES:
+                logger.warning("Artifact too large (%d bytes), skipping: %s", file_size, fpath)
+                continue
+            try:
                 with open(p, "rb") as f:
                     await update.message.reply_document(document=f, filename=p.name)
+                sent_count += 1
+            except Exception as send_err:
+                logger.warning("Failed to send artifact %s: %s", p.name, send_err)
+
+        if sent_count == 0 and result.get("artifacts"):
+            logger.error(
+                "No artifacts were successfully sent out of %d detected",
+                len(result.get("artifacts", [])),
+            )
 
         await db.update_task(
             task_id,

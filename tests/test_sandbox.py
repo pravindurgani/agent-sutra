@@ -15,7 +15,12 @@ from tools.sandbox import (
     _extract_traceback,
     _filter_env,
     _is_artifact_file,
+    _walk_artifacts,
     _extract_paths_from_stdout,
+    _apply_artifact_sanity_check,
+    _EXCLUDED_DIR_NAMES,
+    _EXCLUDED_FILENAMES,
+    _EXCLUDED_EXTENSIONS,
     _PIP_NAME_MAP,
 )
 from pathlib import Path
@@ -708,6 +713,178 @@ class TestArtifactFilter:
 
     def test_python_script_accepted(self):
         assert _is_artifact_file(Path("/project/script.py")) is True
+
+    # ── Venv / infrastructure filtering (v6.9) ──────────────────────
+
+    def test_pyvenv_cfg_rejected(self):
+        assert _is_artifact_file(Path("/project/venv/pyvenv.cfg")) is False
+
+    def test_activate_script_rejected(self):
+        assert _is_artifact_file(Path("/project/venv/bin/activate")) is False
+
+    def test_activate_fish_rejected(self):
+        assert _is_artifact_file(Path("/project/venv/bin/activate.fish")) is False
+
+    def test_activate_ps1_rejected(self):
+        assert _is_artifact_file(Path("/project/venv/Scripts/Activate.ps1")) is False
+
+    def test_pip_wrapper_rejected(self):
+        assert _is_artifact_file(Path("/project/venv/bin/pip")) is False
+
+    def test_pip3_wrapper_rejected(self):
+        assert _is_artifact_file(Path("/project/venv/bin/pip3")) is False
+
+    def test_pip311_wrapper_rejected(self):
+        assert _is_artifact_file(Path("/project/venv/bin/pip3.11")) is False
+
+    def test_record_file_rejected(self):
+        assert _is_artifact_file(Path("/project/venv/lib/python3.11/site-packages/pkg-1.0.dist-info/RECORD")) is False
+
+    def test_wheel_metadata_rejected(self):
+        assert _is_artifact_file(Path("/project/venv/lib/python3.11/site-packages/pkg-1.0.dist-info/WHEEL")) is False
+
+    def test_entry_points_rejected(self):
+        assert _is_artifact_file(Path("/project/venv/lib/python3.11/site-packages/pkg.dist-info/entry_points.txt")) is False
+
+    def test_top_level_txt_rejected(self):
+        assert _is_artifact_file(Path("/project/venv/lib/python3.11/site-packages/pkg.dist-info/top_level.txt")) is False
+
+    def test_c_header_rejected(self):
+        assert _is_artifact_file(Path("/project/include/greenlet/greenlet.h")) is False
+
+    def test_so_file_rejected(self):
+        assert _is_artifact_file(Path("/project/venv/lib/python3.11/site-packages/greenlet/_greenlet.so")) is False
+
+    def test_installed_py_in_site_packages_rejected(self):
+        assert _is_artifact_file(Path("/project/venv/lib/python3.11/site-packages/typing_extensions.py")) is False
+
+    def test_node_modules_rejected(self):
+        assert _is_artifact_file(Path("/project/node_modules/express/index.js")) is False
+
+    def test_dot_venv_rejected(self):
+        assert _is_artifact_file(Path("/project/.venv/lib/python3.11/site-packages/requests/__init__.py")) is False
+
+    def test_egg_info_dir_rejected(self):
+        assert _is_artifact_file(Path("/project/venv/lib/python3.11/site-packages/pkg.egg-info/PKG-INFO")) is False
+
+    def test_dylib_rejected(self):
+        assert _is_artifact_file(Path("/project/venv/lib/libpython3.11.dylib")) is False
+
+    def test_whl_file_rejected(self):
+        assert _is_artifact_file(Path("/project/downloads/package-1.0-py3-none-any.whl")) is False
+
+
+# ── Walk artifacts (directory-pruning scanner) ──────────────────────
+
+
+class TestWalkArtifacts:
+    """_walk_artifacts must prune excluded directories and skip infrastructure files."""
+
+    def test_skips_venv_directory(self, tmp_path):
+        """Files inside .venv/ should not be returned."""
+        venv = tmp_path / ".venv" / "bin"
+        venv.mkdir(parents=True)
+        (venv / "activate").write_text("#!/bin/bash")
+        (venv / "pip3").write_text("#!/bin/bash")
+        output = tmp_path / "report.html"
+        output.write_text("<html>done</html>")
+
+        results = _walk_artifacts(tmp_path)
+        names = [f.name for f in results]
+        assert "report.html" in names
+        assert "activate" not in names
+        assert "pip3" not in names
+
+    def test_skips_node_modules(self, tmp_path):
+        """Files inside node_modules/ should not be returned."""
+        nm = tmp_path / "node_modules" / "express"
+        nm.mkdir(parents=True)
+        (nm / "index.js").write_text("module.exports = {}")
+        output = tmp_path / "app.html"
+        output.write_text("<html>app</html>")
+
+        results = _walk_artifacts(tmp_path)
+        names = [f.name for f in results]
+        assert "app.html" in names
+        assert "index.js" not in names
+
+    def test_skips_dist_info_directories(self, tmp_path):
+        """Files inside *.dist-info/ should not be returned."""
+        dist = tmp_path / "typing_extensions-4.9.0.dist-info"
+        dist.mkdir()
+        (dist / "RECORD").write_text("record data")
+        (dist / "WHEEL").write_text("wheel data")
+        output = tmp_path / "output.csv"
+        output.write_text("a,b,c")
+
+        results = _walk_artifacts(tmp_path)
+        names = [f.name for f in results]
+        assert "output.csv" in names
+        assert "RECORD" not in names
+        assert "WHEEL" not in names
+
+    def test_skips_empty_files(self, tmp_path):
+        """Empty files (0 bytes) should not be returned."""
+        empty = tmp_path / "empty.txt"
+        empty.write_text("")
+        real = tmp_path / "data.csv"
+        real.write_text("a,b,c")
+
+        results = _walk_artifacts(tmp_path)
+        names = [f.name for f in results]
+        assert "data.csv" in names
+        assert "empty.txt" not in names
+
+    def test_skips_pycache(self, tmp_path):
+        """Files inside __pycache__/ should not be returned."""
+        cache = tmp_path / "__pycache__"
+        cache.mkdir()
+        (cache / "mod.cpython-311.pyc").write_bytes(b"\x00" * 100)
+        output = tmp_path / "result.json"
+        output.write_text('{"ok": true}')
+
+        results = _walk_artifacts(tmp_path)
+        names = [f.name for f in results]
+        assert "result.json" in names
+        assert not any("pyc" in n for n in names)
+
+    def test_skips_site_packages(self, tmp_path):
+        """Files inside site-packages/ should not be returned."""
+        sp = tmp_path / "lib" / "python3.11" / "site-packages" / "requests"
+        sp.mkdir(parents=True)
+        (sp / "__init__.py").write_text("# requests")
+        output = tmp_path / "report.pdf"
+        output.write_bytes(b"%PDF-content")
+
+        results = _walk_artifacts(tmp_path)
+        names = [f.name for f in results]
+        assert "report.pdf" in names
+        assert "__init__.py" not in names
+
+
+# ── Sanity check for excessive artifacts ─────────────────────────
+
+
+class TestArtifactSanityCheck:
+    """_apply_artifact_sanity_check filters when too many artifacts detected."""
+
+    def test_under_threshold_passes_through(self):
+        files = [f"/tmp/file_{i}.html" for i in range(10)]
+        result = _apply_artifact_sanity_check(files, Path("/tmp"))
+        assert result == files
+
+    def test_over_threshold_filters_to_output_extensions(self):
+        output_files = [f"/tmp/report_{i}.pdf" for i in range(5)]
+        junk_files = [f"/tmp/junk_{i}" for i in range(20)]  # no extension
+        all_files = output_files + junk_files
+        result = _apply_artifact_sanity_check(all_files, Path("/tmp"))
+        assert len(result) == 5
+        assert all(f.endswith(".pdf") for f in result)
+
+    def test_over_threshold_keeps_originals_if_no_output_extensions(self):
+        files = [f"/tmp/file_{i}" for i in range(25)]  # no extensions
+        result = _apply_artifact_sanity_check(files, Path("/tmp"))
+        assert result == files  # Falls back to originals
 
 
 # ── Stdout fallback artifact detection ─────────────────────────────

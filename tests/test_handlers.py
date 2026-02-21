@@ -342,6 +342,101 @@ class TestHandleDocument:
 # ── Scheduled task timeout ──────────────────────────────────────────
 
 
+class TestArtifactDeliveryResilience:
+    """Artifact delivery must handle empty files and send failures gracefully."""
+
+    @pytest.mark.asyncio
+    async def test_scheduled_empty_file_skipped(self):
+        """Empty artifact files (0 bytes) should be skipped with a warning."""
+        import tempfile
+        from bot.handlers import _scheduled_task_run
+
+        with tempfile.NamedTemporaryFile(suffix=".html", delete=False) as f:
+            empty_path = f.name  # 0 bytes
+
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False, mode='wb') as f:
+            f.write(b"%PDF-content")
+            valid_path = f.name
+
+        mock_result = {
+            "final_response": "Done",
+            "artifacts": [empty_path, valid_path],
+        }
+
+        try:
+            with patch("bot.handlers.db") as mock_db, \
+                 patch("bot.handlers.run_task", return_value=mock_result), \
+                 patch("bot.handlers.Bot") as MockBot, \
+                 patch.object(config, "LONG_TIMEOUT", 30), \
+                 patch.object(config, "RAM_THRESHOLD_PERCENT", 99):
+
+                mock_db.create_task = AsyncMock()
+                mock_db.update_task = AsyncMock()
+                mock_db.build_conversation_context = AsyncMock(return_value="")
+
+                mock_bot_instance = AsyncMock()
+                MockBot.return_value.__aenter__ = AsyncMock(return_value=mock_bot_instance)
+                MockBot.return_value.__aexit__ = AsyncMock(return_value=False)
+
+                await _scheduled_task_run(chat_id=123, user_id=456, task_message="test")
+
+                # Only the valid PDF should be sent (empty HTML skipped)
+                doc_calls = mock_bot_instance.send_document.call_args_list
+                assert len(doc_calls) == 1
+                assert doc_calls[0][1]["filename"].endswith(".pdf")
+        finally:
+            os.unlink(empty_path)
+            os.unlink(valid_path)
+
+    @pytest.mark.asyncio
+    async def test_scheduled_send_failure_continues(self):
+        """If one artifact send fails, remaining artifacts still get sent."""
+        import tempfile
+        from bot.handlers import _scheduled_task_run
+
+        files = []
+        for content in [b"first", b"second"]:
+            with tempfile.NamedTemporaryFile(suffix=".html", delete=False, mode='wb') as f:
+                f.write(content)
+                files.append(f.name)
+
+        mock_result = {
+            "final_response": "Done",
+            "artifacts": files,
+        }
+
+        call_count = [0]
+        async def mock_send_doc(**kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise Exception("Telegram API error")
+
+        try:
+            with patch("bot.handlers.db") as mock_db, \
+                 patch("bot.handlers.run_task", return_value=mock_result), \
+                 patch("bot.handlers.Bot") as MockBot, \
+                 patch.object(config, "LONG_TIMEOUT", 30), \
+                 patch.object(config, "RAM_THRESHOLD_PERCENT", 99):
+
+                mock_db.create_task = AsyncMock()
+                mock_db.update_task = AsyncMock()
+                mock_db.build_conversation_context = AsyncMock(return_value="")
+
+                mock_bot_instance = AsyncMock()
+                mock_bot_instance.send_document = mock_send_doc
+                MockBot.return_value.__aenter__ = AsyncMock(return_value=mock_bot_instance)
+                MockBot.return_value.__aexit__ = AsyncMock(return_value=False)
+
+                # Should not crash despite one send failing
+                await _scheduled_task_run(chat_id=123, user_id=456, task_message="test")
+
+                # Both were attempted
+                assert call_count[0] == 2
+        finally:
+            for f in files:
+                os.unlink(f)
+
+
 class TestScheduledTaskTimeout:
     """_scheduled_task_run must respect LONG_TIMEOUT."""
 

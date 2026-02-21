@@ -289,12 +289,11 @@ def _run_code_docker(
     # Track path→mtime to detect both new AND modified files (e.g. overwritten on retry)
     existing_mtimes = {}
     if working_dir.exists():
-        for f in working_dir.rglob("*"):
-            if f.is_file():
-                try:
-                    existing_mtimes[f] = f.stat().st_mtime
-                except OSError:
-                    pass
+        for f in _walk_artifacts(working_dir):
+            try:
+                existing_mtimes[f] = f.stat().st_mtime
+            except OSError:
+                pass
 
     suffix = {"python": ".py", "javascript": ".js", "bash": ".sh"}.get(language, ".py")
     container_name = f"agentcore-{uuid.uuid4().hex[:12]}"
@@ -321,8 +320,8 @@ def _run_code_docker(
         )
 
         new_files = []
-        for f in working_dir.rglob("*"):
-            if f.is_file() and f != script_path and _is_artifact_file(f):
+        for f in _walk_artifacts(working_dir):
+            if f != script_path:
                 prev_mtime = existing_mtimes.get(f)
                 if prev_mtime is None or f.stat().st_mtime > prev_mtime:
                     new_files.append(str(f))
@@ -332,6 +331,9 @@ def _run_code_docker(
             new_files = _extract_paths_from_stdout(result.stdout, working_dir)
             if new_files:
                 logger.info("Artifacts detected via stdout fallback: %s", [Path(f).name for f in new_files])
+
+        # Sanity check: too many artifacts likely indicates venv/package leak
+        new_files = _apply_artifact_sanity_check(new_files, working_dir)
 
         if new_files:
             logger.info("Artifacts detected: %s", [Path(f).name for f in new_files])
@@ -402,28 +404,147 @@ def _docker_pip_install(package: str) -> ExecutionResult:
             return ExecutionResult(success=False, stderr=str(e))
 
 
+# ── Artifact detection and filtering ─────────────────────────────
+
+# Directories that should NEVER be scanned for artifacts
+_EXCLUDED_DIR_NAMES = frozenset({
+    # Python virtual environments
+    ".venv", "venv", "env", "virtualenv",
+    "site-packages", "dist-packages",
+    # Python internals
+    "__pycache__", ".mypy_cache", ".pytest_cache",
+    ".ruff_cache", ".tox", ".nox",
+    # Node.js
+    "node_modules",
+    # Version control
+    ".git", ".svn", ".hg",
+    # IDE and OS
+    ".idea", ".vscode",
+    # Build artifacts
+    "__pypackages__",
+    # Pip/package management
+    ".pip-cache", "pip-cache",
+})
+
+# Exact filenames that are NEVER user artifacts
+_EXCLUDED_FILENAMES = frozenset({
+    # Virtual environment markers
+    "pyvenv.cfg",
+    # Shell activation scripts
+    "activate", "activate.csh", "activate.fish",
+    "activate.nu", "activate.ps1", "Activate.ps1",
+    "activate_this.py", "deactivate.nu",
+    # Pip wrapper scripts (no extension)
+    "pip", "pip3", "pip3.11", "pip3.12", "pip3.13",
+    "wheel", "easy_install",
+    # Package metadata files
+    "RECORD", "WHEEL", "METADATA", "INSTALLER",
+    "entry_points.txt", "top_level.txt", "direct_url.json",
+    "PKG-INFO",
+    # OS metadata
+    ".DS_Store", "Thumbs.db", "desktop.ini",
+    # Python
+    ".coverage", ".python-version",
+    # Package manager locks
+    "package-lock.json", "yarn.lock", "poetry.lock",
+    "Pipfile.lock", "pdm.lock",
+})
+
+# File extensions that are NEVER user artifacts
+_EXCLUDED_EXTENSIONS = frozenset({
+    ".pyc", ".pyo", ".pyd",       # Python compiled
+    ".so", ".dylib", ".dll",       # Shared libraries
+    ".o", ".a", ".lib",            # Object/static libraries
+    ".h", ".hpp", ".hh",           # C/C++ headers
+    ".whl",                        # Wheel packages
+    ".egg",                        # Egg packages
+})
+
+
 def _is_artifact_file(path: Path) -> bool:
-    """Return True if a file is a genuine output artifact (not cache/metadata)."""
+    """Return True if a file is a genuine output artifact (not infrastructure/cache/metadata).
+
+    Multi-layer filter:
+    1. Exclude files inside known infrastructure directories
+    2. Exclude files matching known non-artifact filenames
+    3. Exclude files with known non-artifact extensions
+    """
+    # Layer 1: Directory-level exclusions
+    for part in path.parts:
+        if part in _EXCLUDED_DIR_NAMES:
+            return False
+        if part.endswith(".dist-info") or part.endswith(".egg-info"):
+            return False
+
     name = path.name
-    # Skip Python bytecode cache
-    if name.endswith(".pyc") or name.endswith(".pyo"):
+
+    # Layer 2: Exact filename matches
+    if name in _EXCLUDED_FILENAMES:
         return False
-    # Skip files inside __pycache__ directories
-    if "__pycache__" in path.parts:
+
+    # Layer 3: Extension-based exclusions
+    suffix = path.suffix.lower()
+    if suffix in _EXCLUDED_EXTENSIONS:
         return False
-    # Skip macOS metadata
-    if name == ".DS_Store":
-        return False
+
     return True
 
 
-# Common output file extensions for stdout fallback detection
+def _walk_artifacts(directory: Path) -> list[Path]:
+    """Walk directory for artifact files, pruning excluded directory trees.
+
+    Unlike rglob('*'), this skips entire subtrees that contain
+    only infrastructure files (venvs, site-packages, node_modules, etc.).
+    Also skips empty files (0 bytes).
+    """
+    artifacts = []
+    for root, dirs, files in os.walk(directory):
+        # Prune excluded directories IN-PLACE (prevents os.walk from descending)
+        dirs[:] = [
+            d for d in dirs
+            if d not in _EXCLUDED_DIR_NAMES
+            and not d.endswith(".dist-info")
+            and not d.endswith(".egg-info")
+        ]
+        for fname in files:
+            fpath = Path(root) / fname
+            if _is_artifact_file(fpath):
+                try:
+                    if fpath.stat().st_size > 0:
+                        artifacts.append(fpath)
+                except OSError:
+                    pass
+    return artifacts
+
+
+# Maximum artifacts before triggering safety filter
+_MAX_EXPECTED_ARTIFACTS = 20
+
+# Common output file extensions for stdout fallback and sanity filtering
 _OUTPUT_EXTENSIONS = {
     ".html", ".pdf", ".csv", ".xlsx", ".xls", ".json", ".xml",
     ".png", ".jpg", ".jpeg", ".gif", ".svg",
     ".txt", ".md", ".zip", ".tar", ".gz",
     ".py", ".js", ".css", ".parquet",
 }
+
+
+def _apply_artifact_sanity_check(new_files: list[str], working_dir: Path) -> list[str]:
+    """If too many artifacts detected, filter to known output extensions only."""
+    if len(new_files) <= _MAX_EXPECTED_ARTIFACTS:
+        return new_files
+    logger.warning(
+        "Excessive artifacts detected (%d files) in %s — possible venv/package leak. "
+        "Filtering to known output extensions only.",
+        len(new_files), working_dir,
+    )
+    filtered = [f for f in new_files if Path(f).suffix.lower() in _OUTPUT_EXTENSIONS]
+    if filtered:
+        logger.info("Filtered to %d files with output extensions: %s",
+                     len(filtered), [Path(f).name for f in filtered])
+        return filtered
+    logger.warning("No files matched output extensions after filtering")
+    return new_files  # Return originals if filtering removes everything
 
 
 def _extract_paths_from_stdout(stdout: str, working_dir: Path) -> list[str]:
@@ -450,7 +571,8 @@ def _extract_paths_from_stdout(stdout: str, working_dir: Path) -> list[str]:
                 found.append(str(p))
 
     # 2. Match relative paths with output extensions (resolve against working_dir)
-    for match in re.finditer(r'([\w./\\-]+\.(?:' + '|'.join(ext.lstrip('.') for ext in _OUTPUT_EXTENSIONS) + r'))\b', stdout):
+    ext_pattern = '|'.join(ext.lstrip('.') for ext in _OUTPUT_EXTENSIONS)
+    for match in re.finditer(r'([\w./\\-]+\.(?:' + ext_pattern + r'))\b', stdout):
         candidate = match.group(1)
         if candidate.startswith('/'):
             continue  # Already handled above
@@ -513,12 +635,11 @@ def run_code(
     # Track path→mtime to detect both new AND modified files (e.g. overwritten on retry)
     existing_mtimes = {}
     if working_dir.exists():
-        for f in working_dir.rglob("*"):
-            if f.is_file():
-                try:
-                    existing_mtimes[f] = f.stat().st_mtime
-                except OSError:
-                    pass
+        for f in _walk_artifacts(working_dir):
+            try:
+                existing_mtimes[f] = f.stat().st_mtime
+            except OSError:
+                pass
 
     suffix = {"python": ".py", "javascript": ".js", "bash": ".sh"}.get(language, ".py")
 
@@ -560,8 +681,8 @@ def run_code(
             return ExecutionResult(success=False, stderr=f"Execution timed out after {timeout}s", timed_out=True)
 
         new_files = []
-        for f in working_dir.rglob("*"):
-            if f.is_file() and f != script_path and _is_artifact_file(f):
+        for f in _walk_artifacts(working_dir):
+            if f != script_path:
                 prev_mtime = existing_mtimes.get(f)
                 if prev_mtime is None or f.stat().st_mtime > prev_mtime:
                     new_files.append(str(f))
@@ -571,6 +692,9 @@ def run_code(
             new_files = _extract_paths_from_stdout(stdout, working_dir)
             if new_files:
                 logger.info("Artifacts detected via stdout fallback: %s", [Path(f).name for f in new_files])
+
+        # Sanity check: too many artifacts likely indicates venv/package leak
+        new_files = _apply_artifact_sanity_check(new_files, working_dir)
 
         if new_files:
             logger.info("Artifacts detected: %s", [Path(f).name for f in new_files])
@@ -699,12 +823,11 @@ def run_shell(
 
     # Track path→mtime to detect both new AND modified files (e.g. overwritten on retry)
     existing_mtimes = {}
-    for f in working_dir.rglob("*"):
-        if f.is_file():
-            try:
-                existing_mtimes[f] = f.stat().st_mtime
-            except OSError:
-                pass
+    for f in _walk_artifacts(working_dir):
+        try:
+            existing_mtimes[f] = f.stat().st_mtime
+        except OSError:
+            pass
 
     logger.info("Shell exec: %s (cwd=%s, timeout=%ds)", command[:200], working_dir, timeout)
 
@@ -724,17 +847,19 @@ def run_shell(
             return ExecutionResult(success=False, stderr=f"Timed out after {timeout}s", timed_out=True)
 
         new_files = []
-        for f in working_dir.rglob("*"):
-            if f.is_file() and _is_artifact_file(f):
-                prev_mtime = existing_mtimes.get(f)
-                if prev_mtime is None or f.stat().st_mtime > prev_mtime:
-                    new_files.append(str(f))
+        for f in _walk_artifacts(working_dir):
+            prev_mtime = existing_mtimes.get(f)
+            if prev_mtime is None or f.stat().st_mtime > prev_mtime:
+                new_files.append(str(f))
 
         # Fallback: if mtime found nothing but execution succeeded, parse stdout for file paths
         if not new_files and proc.returncode == 0 and stdout:
             new_files = _extract_paths_from_stdout(stdout, working_dir)
             if new_files:
                 logger.info("Artifacts detected via stdout fallback: %s", [Path(f).name for f in new_files])
+
+        # Sanity check: too many artifacts likely indicates venv/package leak
+        new_files = _apply_artifact_sanity_check(new_files, working_dir)
 
         if new_files:
             logger.info("Artifacts detected: %s", [Path(f).name for f in new_files])

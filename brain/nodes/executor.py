@@ -247,10 +247,22 @@ IMPORTANT: Use the filled-in commands above. Do NOT leave {{file}} or {{client}}
         venv_path=venv,
     )
 
+    # For project tasks, filter excessive artifacts (likely venv/package leak)
+    artifacts = result.files_created
+    if len(artifacts) > 15:
+        output_exts = {".html", ".pdf", ".csv", ".xlsx", ".xls", ".json", ".xml",
+                       ".png", ".jpg", ".jpeg", ".gif", ".svg", ".txt", ".md",
+                       ".zip", ".tar", ".gz", ".parquet"}
+        filtered = [f for f in artifacts if Path(f).suffix.lower() in output_exts]
+        if filtered:
+            logger.info("Project artifacts filtered from %d to %d (output extensions only)",
+                        len(artifacts), len(filtered))
+            artifacts = filtered
+
     return {
         "code": code,
         "execution_result": _format_result(result),
-        "artifacts": result.files_created,
+        "artifacts": artifacts,
         "extracted_params": params,
         "working_dir": project_path,
     }

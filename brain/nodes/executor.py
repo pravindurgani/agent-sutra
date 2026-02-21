@@ -246,22 +246,10 @@ IMPORTANT: Use the filled-in commands above. Do NOT leave {{file}} or {{client}}
         venv_path=venv,
     )
 
-    # Supplement artifacts: parse stdout for file paths the snapshot may have missed
-    artifacts = list(result.files_created)
-    known = set(artifacts)
-    for line in result.stdout.splitlines():
-        for marker in ("HTML saved:", "PDF saved:", "Output:", "Saved:"):
-            if marker in line:
-                path_str = line.split(marker, 1)[1].strip()
-                p = Path(path_str)
-                if p.is_file() and str(p) not in known:
-                    artifacts.append(str(p))
-                    known.add(str(p))
-
     return {
         "code": code,
         "execution_result": _format_result(result),
-        "artifacts": artifacts,
+        "artifacts": result.files_created,
         "extracted_params": params,
         "working_dir": project_path,
     }

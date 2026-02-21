@@ -326,6 +326,10 @@ def _run_code_docker(
                 prev_mtime = existing_mtimes.get(f)
                 if prev_mtime is None or f.stat().st_mtime > prev_mtime:
                     new_files.append(str(f))
+        if new_files:
+            logger.info("Artifacts detected: %s", [Path(f).name for f in new_files])
+        else:
+            logger.warning("No artifacts detected in %s (%d files scanned)", working_dir, len(existing_mtimes))
         tb = _extract_traceback(result.stderr) if result.returncode != 0 else ""
 
         return ExecutionResult(
@@ -507,6 +511,10 @@ def run_code(
                 prev_mtime = existing_mtimes.get(f)
                 if prev_mtime is None or f.stat().st_mtime > prev_mtime:
                     new_files.append(str(f))
+        if new_files:
+            logger.info("Artifacts detected: %s", [Path(f).name for f in new_files])
+        else:
+            logger.warning("No artifacts detected in %s (%d files scanned)", working_dir, len(existing_mtimes))
         tb = _extract_traceback(stderr) if proc.returncode != 0 else ""
 
         return ExecutionResult(
@@ -660,6 +668,10 @@ def run_shell(
                 prev_mtime = existing_mtimes.get(f)
                 if prev_mtime is None or f.stat().st_mtime > prev_mtime:
                     new_files.append(str(f))
+        if new_files:
+            logger.info("Artifacts detected: %s", [Path(f).name for f in new_files])
+        else:
+            logger.warning("No artifacts detected in %s (%d files scanned)", working_dir, len(existing_mtimes))
         tb = _extract_traceback(stderr) if proc.returncode != 0 else ""
 
         return ExecutionResult(

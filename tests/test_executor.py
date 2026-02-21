@@ -1,4 +1,4 @@
-"""Tests for brain/nodes/executor.py — code block extraction, timeout estimation."""
+"""Tests for brain/nodes/executor.py — code block extraction, timeout estimation, param extraction."""
 from __future__ import annotations
 
 import sys
@@ -7,7 +7,8 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import config
-from brain.nodes.executor import _strip_markdown_blocks, _estimate_timeout
+from unittest.mock import patch
+from brain.nodes.executor import _strip_markdown_blocks, _estimate_timeout, _extract_params
 
 
 class TestStripMarkdownBlocks:
@@ -99,3 +100,53 @@ class TestEstimateTimeout:
         state = {"task_type": "frontend", "files": []}
         timeout = _estimate_timeout(state)
         assert timeout <= config.MAX_CODE_EXECUTION_TIMEOUT
+
+
+class TestExtractParams:
+    """Parameter extraction from Claude responses, including markdown fence handling."""
+
+    def test_plain_json_response(self):
+        """Claude returns bare JSON — parsed correctly."""
+        state = {
+            "message": "Generate report for Light & Wonder",
+            "files": ["/tmp/data.xlsx"],
+            "project_config": {"commands": {"report": "python3 cli.py --client {client} --input {file}"}},
+        }
+        with patch("brain.nodes.executor.claude_client.call", return_value='{"client": "Light & Wonder", "file": "/tmp/data.xlsx"}'):
+            params = _extract_params(state)
+        assert params["client"] == "Light & Wonder"
+        assert params["file"] == "/tmp/data.xlsx"
+
+    def test_markdown_fenced_json_response(self):
+        """Claude wraps JSON in ```json...``` fences — still parsed correctly."""
+        state = {
+            "message": "Generate report for Light & Wonder",
+            "files": ["/tmp/data.xlsx"],
+            "project_config": {"commands": {"report": "python3 cli.py --client {client} --input {file}"}},
+        }
+        fenced_response = '```json\n{"client": "Light & Wonder", "file": "/tmp/data.xlsx"}\n```'
+        with patch("brain.nodes.executor.claude_client.call", return_value=fenced_response):
+            params = _extract_params(state)
+        assert params["client"] == "Light & Wonder"
+        assert params["file"] == "/tmp/data.xlsx"
+
+    def test_no_placeholders_returns_empty(self):
+        """Commands with no {param} placeholders — returns empty dict."""
+        state = {
+            "message": "Run the scraper",
+            "files": [],
+            "project_config": {"commands": {"run": "python3 scraper.py"}},
+        }
+        params = _extract_params(state)
+        assert params == {}
+
+    def test_unparseable_response_fallback(self):
+        """Claude returns garbage — falls back to auto-detect file from uploads."""
+        state = {
+            "message": "Generate report",
+            "files": ["/tmp/upload.xlsx"],
+            "project_config": {"commands": {"report": "python3 cli.py --input {file}"}},
+        }
+        with patch("brain.nodes.executor.claude_client.call", return_value="I cannot determine the parameters"):
+            params = _extract_params(state)
+        assert params.get("file") == "/tmp/upload.xlsx"

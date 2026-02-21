@@ -1,4 +1,4 @@
-# AgentCore v6.7 — Complete Capabilities & Usage Guide
+# AgentCore v6.8 — Complete Capabilities & Usage Guide
 
 **Status: GOD MODE ACHIEVED**
 
@@ -44,7 +44,7 @@ God Mode = the agent has the same power level as you sitting at the terminal, bu
 | Rate limiting | YES | 5-second per-user cooldown between task submissions |
 | Storage auto-cleanup | YES | Prunes old data (30d/90d) and workspace files (7d) on startup |
 | Monthly maintenance cron | YES | SQLite VACUUM, pip-cache cleanup, Docker prune — launchd scheduled |
-| 235 automated tests | YES | Unit + integration + handler tests with mocked pipeline |
+| 258 automated tests | YES | Unit + integration + handler + e2e artifact delivery tests with mocked pipeline |
 | Docker container isolation | YES | Optional: isolates run_code() in disposable containers, host filesystem inaccessible |
 | Docker network isolation | YES | `DOCKER_NETWORK=none` for airgapped execution of sensitive data tasks |
 
@@ -651,4 +651,4 @@ The job survives bot restarts via APScheduler SQLite persistence.
          Internet | Ollama | ~/ filesystem | Any shell command
 ```
 
-**235 tests (225 passed + 10 skipped). 10 skipped tests require Docker Desktop. Zero known bugs. Production-ready.**
+**258 tests (248 passed + 10 skipped). 10 skipped tests require Docker Desktop. Zero known bugs. Production-ready.**

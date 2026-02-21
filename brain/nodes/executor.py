@@ -146,6 +146,7 @@ Rules:
 Respond with ONLY valid JSON, e.g.: {{"client": "Light & Wonder", "file": "/path/to/file.xlsx"}}"""
 
     response = claude_client.call(prompt, system="", max_tokens=200)
+    response = _strip_markdown_blocks(response)
 
     try:
         params = json.loads(response)

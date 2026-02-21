@@ -14,6 +14,7 @@ from tools.sandbox import (
     _parse_import_error,
     _extract_traceback,
     _filter_env,
+    _is_artifact_file,
     _PIP_NAME_MAP,
 )
 from pathlib import Path
@@ -662,3 +663,47 @@ class TestFileDetection:
             assert "untouched.txt" not in names
         finally:
             self._cleanup(d)
+
+    def test_pyc_files_excluded(self):
+        """Python bytecode cache files must never appear in files_created."""
+        from tools.sandbox import run_code
+        d = self._make_home_tmp()
+        try:
+            # Create a module so Python generates .pyc on import
+            (d / "mymod.py").write_text("X = 42")
+            code = "import mymod; print(mymod.X); open('result.txt','w').write('done')"
+            result = run_code(code, "python", working_dir=d, timeout=10)
+            assert result.success
+            names = [Path(f).name for f in result.files_created]
+            assert "result.txt" in names
+            assert not any(n.endswith(".pyc") for n in names), f"pyc leaked: {names}"
+        finally:
+            self._cleanup(d)
+
+
+# ── Artifact filter unit tests ────────────────────────────────────
+
+
+class TestArtifactFilter:
+    """_is_artifact_file must reject cache/metadata, accept real outputs."""
+
+    def test_pyc_rejected(self):
+        assert _is_artifact_file(Path("/project/__pycache__/mod.cpython-311.pyc")) is False
+
+    def test_pyo_rejected(self):
+        assert _is_artifact_file(Path("/project/old.pyo")) is False
+
+    def test_ds_store_rejected(self):
+        assert _is_artifact_file(Path("/project/.DS_Store")) is False
+
+    def test_html_accepted(self):
+        assert _is_artifact_file(Path("/project/app/output/Report.html")) is True
+
+    def test_pdf_accepted(self):
+        assert _is_artifact_file(Path("/project/app/output/Report.pdf")) is True
+
+    def test_csv_accepted(self):
+        assert _is_artifact_file(Path("/project/data/output.csv")) is True
+
+    def test_python_script_accepted(self):
+        assert _is_artifact_file(Path("/project/script.py")) is True

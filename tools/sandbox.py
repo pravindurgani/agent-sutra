@@ -322,7 +322,7 @@ def _run_code_docker(
 
         new_files = []
         for f in working_dir.rglob("*"):
-            if f.is_file() and f != script_path:
+            if f.is_file() and f != script_path and _is_artifact_file(f):
                 prev_mtime = existing_mtimes.get(f)
                 if prev_mtime is None or f.stat().st_mtime > prev_mtime:
                     new_files.append(str(f))
@@ -389,6 +389,21 @@ def _docker_pip_install(package: str) -> ExecutionResult:
             return ExecutionResult(success=False, stderr="pip install timed out", timed_out=True)
         except Exception as e:
             return ExecutionResult(success=False, stderr=str(e))
+
+
+def _is_artifact_file(path: Path) -> bool:
+    """Return True if a file is a genuine output artifact (not cache/metadata)."""
+    name = path.name
+    # Skip Python bytecode cache
+    if name.endswith(".pyc") or name.endswith(".pyo"):
+        return False
+    # Skip files inside __pycache__ directories
+    if "__pycache__" in path.parts:
+        return False
+    # Skip macOS metadata
+    if name == ".DS_Store":
+        return False
+    return True
 
 
 @dataclass
@@ -488,7 +503,7 @@ def run_code(
 
         new_files = []
         for f in working_dir.rglob("*"):
-            if f.is_file() and f != script_path:
+            if f.is_file() and f != script_path and _is_artifact_file(f):
                 prev_mtime = existing_mtimes.get(f)
                 if prev_mtime is None or f.stat().st_mtime > prev_mtime:
                     new_files.append(str(f))
@@ -641,7 +656,7 @@ def run_shell(
 
         new_files = []
         for f in working_dir.rglob("*"):
-            if f.is_file():
+            if f.is_file() and _is_artifact_file(f):
                 prev_mtime = existing_mtimes.get(f)
                 if prev_mtime is None or f.stat().st_mtime > prev_mtime:
                     new_files.append(str(f))

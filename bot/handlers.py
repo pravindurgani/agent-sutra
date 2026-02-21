@@ -1,3 +1,4 @@
+import re
 import uuid
 import asyncio
 import functools
@@ -43,6 +44,20 @@ def _check_resources(running_tasks: dict) -> str | None:
         )
 
     return None
+
+
+def _sanitize_error_for_user(error: str) -> str:
+    """Sanitize error messages before sending to user via Telegram.
+
+    Strips internal paths, API key fragments, and raw tracebacks.
+    Preserves meaningful error descriptions.
+    """
+    msg = error[:500]
+    # Strip absolute paths (keep just the filename)
+    msg = re.sub(r'/[\w/.-]+/([^/\s]+)', r'\1', msg)
+    # Strip anything that looks like an API key or token fragment
+    msg = re.sub(r'(sk-|api[-_]key|token)[^\s,]{8,}', '[REDACTED]', msg, flags=re.IGNORECASE)
+    return msg
 
 
 # Stage labels for streaming status
@@ -164,7 +179,10 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["running_tasks"] = {}
 
     if cancelled:
-        await update.message.reply_text(f"Cancelled {cancelled} task(s).")
+        await update.message.reply_text(
+            f"Cancelled {cancelled} task(s).\n"
+            "Note: background execution may take a moment to fully stop."
+        )
     else:
         await update.message.reply_text("No running tasks to cancel.")
 
@@ -499,7 +517,8 @@ async def _scheduled_task_run(chat_id: int, user_id: int, task_message: str):
         except Exception as e:
             logger.error("Scheduled task %s failed: %s", tid, e, exc_info=True)
             try:
-                await bot.send_message(chat_id=chat_id, text=f"[Scheduled] Task failed: {e}")
+                safe_msg = _sanitize_error_for_user(str(e))
+                await bot.send_message(chat_id=chat_id, text=f"[Scheduled] Task failed: {safe_msg}")
             except Exception:
                 pass
             await db.update_task(tid, status="failed", error=str(e))
@@ -541,15 +560,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await db.update_task(task_id, status="running")
 
-        # Launch the pipeline in a thread
-        task_future = asyncio.ensure_future(asyncio.to_thread(
-            run_task,
-            task_id=task_id,
-            user_id=user_id,
-            message=message,
-            files=context.user_data.get("pending_files", []),
-            conversation_context=conversation_ctx,
-        ))
+        # Snapshot which files this task will consume (Fix 4: preserve uploads during concurrent tasks)
+        consumed = context.user_data.get("pending_files", [])
+        context.user_data["_consumed_files_" + task_id] = list(consumed)
+
+        # Launch the pipeline in a thread, with outer timeout matching scheduled tasks
+        task_future = asyncio.ensure_future(
+            asyncio.wait_for(
+                asyncio.to_thread(
+                    run_task,
+                    task_id=task_id,
+                    user_id=user_id,
+                    message=message,
+                    files=list(consumed),
+                    conversation_context=conversation_ctx,
+                ),
+                timeout=config.LONG_TIMEOUT,
+            )
+        )
 
         # Track this task (concurrency-safe: dict keyed by task_id)
         running_tasks = context.user_data.setdefault("running_tasks", {})
@@ -645,14 +673,30 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info("Task %s was cancelled", task_id)
         await update.message.reply_text("Task was cancelled.")
         await db.update_task(task_id, status="cancelled")
+    except asyncio.TimeoutError:
+        logger.error("Interactive task %s timed out after %ds", task_id, config.LONG_TIMEOUT)
+        await update.message.reply_text(
+            f"Task timed out after {config.LONG_TIMEOUT // 60} minutes. "
+            "The task was too complex or an external service was unresponsive."
+        )
+        await db.update_task(task_id, status="failed", error=f"Pipeline timed out after {config.LONG_TIMEOUT}s")
     except Exception as e:
         logger.error("Task %s failed: %s", task_id, e, exc_info=True)
-        await update.message.reply_text(f"Task failed: {e}")
+        safe_msg = _sanitize_error_for_user(str(e))
+        await update.message.reply_text(f"Task failed: {safe_msg}")
         await db.update_task(task_id, status="failed", error=str(e))
     finally:
         running_tasks = context.user_data.get("running_tasks", {})
         running_tasks.pop(task_id, None)
-        context.user_data.pop("pending_files", None)  # Always clear, even on error
+        # Only clear pending_files that were consumed by THIS task.
+        # If user uploaded new files while this task was running, preserve them.
+        consumed_files = set(context.user_data.pop("_consumed_files_" + task_id, []))
+        current_pending = context.user_data.get("pending_files", [])
+        remaining = [f for f in current_pending if f not in consumed_files]
+        if remaining:
+            context.user_data["pending_files"] = remaining
+        else:
+            context.user_data.pop("pending_files", None)
         clear_stage(task_id)
 
 
@@ -695,7 +739,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def _send_long_message(update: Update, text: str):
-    """Split and send messages that exceed Telegram's character limit."""
+    """Split and send messages that exceed Telegram's character limit.
+
+    Includes small delays between chunks to respect Telegram rate limits.
+    """
     max_len = config.TELEGRAM_MAX_MESSAGE_LENGTH
     if len(text) <= max_len:
         await update.message.reply_text(text)
@@ -718,6 +765,21 @@ async def _send_long_message(update: Update, text: str):
     if current:
         chunks.append(current)
 
-    for chunk in chunks:
+    for i, chunk in enumerate(chunks):
         if chunk:
-            await update.message.reply_text(chunk)
+            try:
+                await update.message.reply_text(chunk)
+            except Exception as e:
+                logger.warning("Failed to send message chunk %d/%d: %s", i + 1, len(chunks), e)
+                # On RetryAfter, wait and retry once
+                if "retry after" in str(e).lower():
+                    wait_match = re.search(r'(\d+)', str(e))
+                    wait_time = int(wait_match.group(1)) if wait_match else 5
+                    await asyncio.sleep(wait_time)
+                    try:
+                        await update.message.reply_text(chunk)
+                    except Exception:
+                        pass  # Give up on this chunk
+            # Small delay between chunks to avoid rate limits
+            if i < len(chunks) - 1:
+                await asyncio.sleep(0.3)

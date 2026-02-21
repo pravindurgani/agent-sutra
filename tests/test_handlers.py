@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from pathlib import Path
 
 import config
-from bot.handlers import auth_required, _check_resources, _send_long_message, handle_document
+from bot.handlers import auth_required, _check_resources, _send_long_message, handle_document, _sanitize_error_for_user
 
 
 # ── Helpers ──────────────────────────────────────────────────────
@@ -467,3 +467,64 @@ class TestScheduledTaskTimeout:
             last_call = mock_db.update_task.call_args_list[-1]
             assert last_call[1].get("status") == "failed" or "failed" in str(last_call)
             assert "timed out" in str(last_call).lower() or "Timed out" in str(last_call)
+
+
+# ── Error sanitization ─────────────────────────────────────────────
+
+
+class TestErrorSanitization:
+    """_sanitize_error_for_user must strip sensitive details."""
+
+    def test_strips_absolute_paths(self):
+        """Absolute paths are reduced to just the filename."""
+        msg = _sanitize_error_for_user("FileNotFoundError: /Users/prav/secret/project/data.csv not found")
+        assert "/Users/prav" not in msg
+        assert "data.csv" in msg
+
+    def test_strips_api_key_fragments(self):
+        """API key-like strings are redacted."""
+        msg = _sanitize_error_for_user("Auth failed: sk-ant-api03-abcdef1234567890xyz")
+        assert "abcdef" not in msg
+        assert "[REDACTED]" in msg
+
+    def test_preserves_meaningful_error(self):
+        """Normal error messages are kept intact."""
+        msg = _sanitize_error_for_user("Division by zero in calculate()")
+        assert "Division by zero" in msg
+
+    def test_truncates_long_errors(self):
+        """Very long error strings are truncated to 500 chars."""
+        long_msg = "x" * 1000
+        msg = _sanitize_error_for_user(long_msg)
+        assert len(msg) <= 500
+
+    def test_token_keyword_redacted(self):
+        """token=<value> patterns are redacted."""
+        msg = _sanitize_error_for_user("failed with token=abc123def456ghi789jkl")
+        assert "abc123" not in msg
+
+
+# ── Rate-limited message sending ───────────────────────────────────
+
+
+class TestSendLongMessageRateLimit:
+    """_send_long_message must handle Telegram rate limit errors."""
+
+    @pytest.mark.asyncio
+    async def test_retries_on_retry_after_error(self):
+        """When Telegram returns RetryAfter, waits and retries the chunk."""
+        update = _mock_update()
+        call_count = [0]
+
+        async def flaky_reply(text):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise Exception("Flood control exceeded. Retry after 1 seconds")
+
+        update.message.reply_text = flaky_reply
+        # Create a long message that needs splitting
+        text = ("A" * 4000 + "\n") * 2  # ~8000 chars, splits into 2 chunks
+        # Should not raise
+        await _send_long_message(update, text)
+        # First chunk: 1 fail + 1 retry + second chunk = 3 total
+        assert call_count[0] >= 2

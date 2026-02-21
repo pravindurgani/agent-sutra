@@ -52,10 +52,15 @@ DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "claude-sonnet-4-6")
 COMPLEX_MODEL = os.getenv("COMPLEX_MODEL", "claude-opus-4-6")
 
 # Execution limits
-EXECUTION_TIMEOUT = int(os.getenv("EXECUTION_TIMEOUT", "120"))
-MAX_CODE_EXECUTION_TIMEOUT = int(os.getenv("MAX_CODE_EXECUTION_TIMEOUT", "600"))
-LONG_TIMEOUT = int(os.getenv("LONG_TIMEOUT", "900"))
-MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
+EXECUTION_TIMEOUT = int(os.getenv("EXECUTION_TIMEOUT", "120"))       # Single code execution
+MAX_CODE_EXECUTION_TIMEOUT = int(os.getenv("MAX_CODE_EXECUTION_TIMEOUT", "600"))  # Hard cap
+LONG_TIMEOUT = int(os.getenv("LONG_TIMEOUT", "900"))                 # Full pipeline timeout (interactive + scheduled)
+
+# Retry limits
+MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))           # Pipeline audit-retry limit
+API_MAX_RETRIES = int(os.getenv("API_MAX_RETRIES", "5"))   # Claude API call retries (rate limit, timeout)
+
+# File limits
 MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "50"))
 MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 

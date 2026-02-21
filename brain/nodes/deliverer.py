@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 import logging
 from pathlib import Path
 
@@ -150,13 +151,8 @@ def _save_code_artifact(state: AgentState) -> str | None:
 
         import config
         output_dir = config.OUTPUTS_DIR
-        filename = f"{words}.py"
+        filename = f"{words}_{uuid.uuid4().hex[:6]}.py"
         filepath = output_dir / filename
-        counter = 1
-        while filepath.exists():
-            filename = f"{words}_{counter}.py"
-            filepath = output_dir / filename
-            counter += 1
 
         filepath.write_text(code, encoding="utf-8")
         return str(filepath)
@@ -179,7 +175,11 @@ def _fallback_response(state: AgentState, artifacts: list[str]) -> str:
         else:
             parts.append("Task completed successfully.")
     else:
-        parts.append(f"Task completed with issues (after {retry_count} retries).")
+        parts.append(f"Task completed with issues after {retry_count} retries.")
+        # Include audit feedback so the user knows what went wrong
+        audit_feedback = state.get("audit_feedback", "")
+        if audit_feedback:
+            parts.append(f"Last issue: {audit_feedback[:500]}")
 
     # Add execution output summary
     execution_result = state.get("execution_result", "")

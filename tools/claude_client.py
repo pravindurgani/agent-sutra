@@ -147,10 +147,23 @@ def call(
     entire bot's event loop.
     """
     _check_budget()
+
+    # Runtime guard: detect if called from async event loop (would freeze the bot)
+    try:
+        import asyncio as _aio
+        loop = _aio.get_running_loop()
+        if loop.is_running():
+            logger.error(
+                "claude_client.call() invoked from a running event loop! "
+                "This WILL freeze the bot. Wrap in asyncio.to_thread()."
+            )
+    except RuntimeError:
+        pass  # No running event loop — correct usage
+
     model = model or config.DEFAULT_MODEL
     messages = [{"role": "user", "content": prompt}]
 
-    for attempt in range(config.MAX_RETRIES):
+    for attempt in range(config.API_MAX_RETRIES):
         try:
             kwargs = {
                 "model": model,
@@ -214,14 +227,14 @@ def call(
             logger.warning("Timeout, waiting %ds (attempt %d)", wait, attempt + 1)
             time.sleep(wait)
         except APIError as e:
-            if attempt == config.MAX_RETRIES - 1:
-                logger.error("Claude API error after %d attempts: %s", config.MAX_RETRIES, e)
+            if attempt == config.API_MAX_RETRIES - 1:
+                logger.error("Claude API error after %d attempts: %s", config.API_MAX_RETRIES, e)
                 raise
             wait = 2 ** attempt
             logger.warning("API error: %s, retrying in %ds", e, wait)
             time.sleep(wait)
 
-    raise RuntimeError(f"Claude API failed after {config.MAX_RETRIES} attempts")
+    raise RuntimeError(f"Claude API failed after {config.API_MAX_RETRIES} attempts")
 
 
 def call_complex(prompt: str, system: str = "", max_tokens: int = 8192, thinking: bool = False) -> str:

@@ -373,17 +373,12 @@ def _execute_ui_design(state: AgentState) -> dict:
             "artifacts": [],
         }
 
-    # Save the HTML file with dedup to avoid overwriting concurrent outputs
+    # Save the HTML file with UUID suffix to prevent TOCTOU race
     message = state.get("message", "design")
     words = "".join(c if c.isalnum() or c == " " else "" for c in message)
     base_name = "_".join(words.split()[:4]).lower() or "design"
-    filename = f"{base_name}.html"
+    filename = f"{base_name}_{uuid.uuid4().hex[:6]}.html"
     output_path = config.OUTPUTS_DIR / filename
-    counter = 1
-    while output_path.exists():
-        filename = f"{base_name}_{counter}.html"
-        output_path = config.OUTPUTS_DIR / filename
-        counter += 1
 
     output_path.write_text(code, encoding="utf-8")
     logger.info("UI design saved: %s (%d bytes)", output_path, len(code))
@@ -426,17 +421,12 @@ def _execute_frontend(state: AgentState) -> dict:
             "artifacts": [],
         }
 
-    # Save the HTML file with dedup
+    # Save the HTML file with UUID suffix to prevent TOCTOU race
     message = state.get("message", "app")
     words = "".join(c if c.isalnum() or c == " " else "" for c in message)
     base_name = "_".join(words.split()[:4]).lower() or "app"
-    filename = f"{base_name}.html"
+    filename = f"{base_name}_{uuid.uuid4().hex[:6]}.html"
     output_path = config.OUTPUTS_DIR / filename
-    counter = 1
-    while output_path.exists():
-        filename = f"{base_name}_{counter}.html"
-        output_path = config.OUTPUTS_DIR / filename
-        counter += 1
 
     output_path.write_text(code, encoding="utf-8")
     logger.info("Frontend app saved: %s (%d bytes)", output_path, len(code))

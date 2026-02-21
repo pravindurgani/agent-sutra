@@ -155,3 +155,74 @@ class TestRecoverStaleTasks:
 
             task = await get_task("done-1")
             assert task["status"] == "completed"
+
+
+class TestPruneOldTasks:
+    """prune_old_data must also prune old completed/failed/crashed tasks."""
+
+    @pytest.mark.asyncio
+    async def test_old_completed_tasks_pruned(self, tmp_path):
+        """Tasks older than history_days are deleted during pruning."""
+        from unittest.mock import patch
+        from datetime import datetime, timezone, timedelta
+        import config as cfg
+        from storage.db import init_db, prune_old_data
+        import aiosqlite
+
+        test_db = tmp_path / "test_prune.db"
+        with patch.object(cfg, "DB_PATH", test_db):
+            await init_db()
+
+            # Insert an old completed task (60 days old)
+            old_date = (datetime.now(timezone.utc) - timedelta(days=60)).isoformat()
+            async with aiosqlite.connect(str(test_db)) as db:
+                await db.execute(
+                    "INSERT INTO tasks (id, user_id, message, status, created_at) VALUES (?, ?, ?, ?, ?)",
+                    ("old-task", 0, "old task", "completed", old_date),
+                )
+                # Insert a recent task (1 day old)
+                recent_date = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+                await db.execute(
+                    "INSERT INTO tasks (id, user_id, message, status, created_at) VALUES (?, ?, ?, ?, ?)",
+                    ("recent-task", 0, "recent task", "completed", recent_date),
+                )
+                await db.commit()
+
+            await prune_old_data(history_days=30)
+
+            # Old task should be deleted, recent should survive
+            async with aiosqlite.connect(str(test_db)) as db:
+                cursor = await db.execute("SELECT id FROM tasks")
+                remaining = [row[0] for row in await cursor.fetchall()]
+
+            assert "old-task" not in remaining
+            assert "recent-task" in remaining
+
+    @pytest.mark.asyncio
+    async def test_running_tasks_not_pruned(self, tmp_path):
+        """Tasks with status='running' are never pruned (even if old)."""
+        from unittest.mock import patch
+        from datetime import datetime, timezone, timedelta
+        import config as cfg
+        from storage.db import init_db, prune_old_data
+        import aiosqlite
+
+        test_db = tmp_path / "test_prune_running.db"
+        with patch.object(cfg, "DB_PATH", test_db):
+            await init_db()
+
+            old_date = (datetime.now(timezone.utc) - timedelta(days=60)).isoformat()
+            async with aiosqlite.connect(str(test_db)) as db:
+                await db.execute(
+                    "INSERT INTO tasks (id, user_id, message, status, created_at) VALUES (?, ?, ?, ?, ?)",
+                    ("running-task", 0, "still running", "running", old_date),
+                )
+                await db.commit()
+
+            await prune_old_data(history_days=30)
+
+            async with aiosqlite.connect(str(test_db)) as db:
+                cursor = await db.execute("SELECT id FROM tasks WHERE id = 'running-task'")
+                row = await cursor.fetchone()
+
+            assert row is not None, "Running tasks should never be pruned"

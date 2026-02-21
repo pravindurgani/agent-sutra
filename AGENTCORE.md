@@ -1,6 +1,6 @@
-# AgentCore v6.9 - Complete Project Documentation
+# AgentCore v6.10 - Complete Project Documentation
 
-A Telegram-driven AI agent server running on Mac Mini M2 (16GB). Receives tasks via Telegram, processes them through a LangGraph Plan-Execute-Audit pipeline powered by Claude API, and delivers results back. Features: project registry, cross-model adversarial auditing (Sonnet+Opus), full internet access, local AI orchestration (Ollama), big data processing, production frontend generation, Docker container isolation for code execution, 7 task types, 11 commands, budget enforcement, RAM guards, code content scanner, 34-pattern command blocklist, and 258 automated tests.
+A Telegram-driven AI agent server running on Mac Mini M2 (16GB). Receives tasks via Telegram, processes them through a LangGraph Plan-Execute-Audit pipeline powered by Claude API, and delivers results back. Features: project registry, cross-model adversarial auditing (Sonnet+Opus), full internet access, local AI orchestration (Ollama), big data processing, production frontend generation, Docker container isolation for code execution, 7 task types, 11 commands, budget enforcement, RAM guards, code content scanner, 34-pattern command blocklist, and 298 automated tests.
 
 **Last updated:** 2026-02-21
 
@@ -522,6 +522,7 @@ DEFAULT_MODEL=claude-sonnet-4-6
 COMPLEX_MODEL=claude-opus-4-6
 EXECUTION_TIMEOUT=60
 MAX_RETRIES=3
+API_MAX_RETRIES=5
 MAX_FILE_SIZE_MB=50
 ```
 
@@ -842,8 +843,9 @@ All variables are set in `.env` and loaded by `config.py` at import time.
 | `ENABLE_THINKING` | `true` | No | Enable extended thinking for Claude models |
 | `EXECUTION_TIMEOUT` | `120` | No | Max seconds for code/shell execution |
 | `MAX_CODE_EXECUTION_TIMEOUT` | `600` | No | Absolute upper bound for dynamically estimated timeouts |
-| `LONG_TIMEOUT` | `900` | No | Timeout for long-running tasks (scrapers, pipelines) |
+| `LONG_TIMEOUT` | `900` | No | Full pipeline timeout for interactive + scheduled tasks |
 | `MAX_RETRIES` | `3` | No | Max audit retry attempts before giving up |
+| `API_MAX_RETRIES` | `5` | No | Claude API call retries (rate limit, timeout, API errors) |
 | `MAX_FILE_SIZE_MB` | `50` | No | Max upload file size in megabytes |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | No | Ollama API endpoint for local AI models |
 | `OLLAMA_DEFAULT_MODEL` | `llama3.1:8b` | No | Default Ollama model for local inference |
@@ -1340,6 +1342,76 @@ AgentCore was independently stress-tested using a 4-category evaluation protocol
 ---
 
 ## Changelog
+
+### v6.10 - 2026-02-21 - Pipeline Audit Fixes & Operational Hardening
+
+Addresses 11 issues identified during a comprehensive read-only pipeline audit. Focuses on timeout safety, error sanitization, upload preservation, race condition elimination, and storage management.
+
+**Pipeline timeout for interactive tasks (handlers.py):**
+- Interactive tasks now wrapped in `asyncio.wait_for(timeout=config.LONG_TIMEOUT)` — same pattern as scheduled tasks
+- Prevents indefinite hangs if Claude API responds slowly or LangGraph encounters a bug
+- New `asyncio.TimeoutError` handler sends clear user message and marks task as failed
+
+**Error message sanitization (handlers.py):**
+- New `_sanitize_error_for_user()` strips absolute paths, API key fragments, and token values before sending to Telegram
+- Applied to both `handle_message()` and `_scheduled_task_run()` error paths
+- Full error details still logged server-side for debugging
+
+**Honest cancel feedback (handlers.py):**
+- `/cancel` now tells user "background execution may take a moment to fully stop"
+- Acknowledges that `asyncio.to_thread()` cancellation is best-effort
+
+**File upload preservation during concurrent tasks (handlers.py):**
+- Each task snapshots its consumed `pending_files` at launch
+- `finally` block only clears files consumed by THAT task, preserving uploads for the next task
+- Fixes: uploading files during an active task no longer loses them
+
+**Event loop misuse guard (claude_client.py):**
+- Runtime detection if `claude_client.call()` is invoked from a running event loop
+- Logs `ERROR` immediately (would freeze the bot) but doesn't crash the call
+- Zero runtime cost in the correct path
+
+**Atomic filename generation (executor.py, deliverer.py):**
+- UI design, frontend, and code artifact filenames now use UUID suffix instead of counter loop
+- Eliminates TOCTOU race from concurrent tasks generating same base filename
+- Consistent with `file_manager.save_upload()` pattern from v6.7
+
+**Separate API vs pipeline retry counts (config.py, claude_client.py):**
+- New `API_MAX_RETRIES=5` for Claude API call retries (rate limit, timeout, API errors)
+- Existing `MAX_RETRIES=3` reserved for pipeline audit-retry limit
+- API retries can now be more aggressive without affecting pipeline retry budget
+
+**Telegram rate limit handling (handlers.py):**
+- `_send_long_message()` now catches `RetryAfter` errors and waits before retrying
+- 300ms delay between chunks prevents rate limiting on large outputs
+- Failed chunks logged instead of silently dropped
+
+**Better max-retry fallback response (deliverer.py):**
+- `_fallback_response()` now includes audit feedback when verdict != "pass"
+- Users see what the Opus auditor flagged, not just "completed with issues"
+
+**Tasks table pruning (db.py):**
+- `prune_old_data()` now also prunes completed/failed/crashed/cancelled tasks older than `history_days`
+- Prevents unbounded growth of `tasks` table (each record contains plan + result fields)
+- Running tasks are never pruned
+
+**Config reorganization (config.py):**
+- Execution limits, retry limits, and file limits are now separate commented sections
+
+**New tests (11 new, 308 total):**
+- `tests/test_handlers.py` — 6 new: error sanitization (path stripping, API key redaction, meaningful preservation, truncation, token redaction), rate-limited message retry
+- `tests/test_budget.py` — 3 new: API_MAX_RETRIES existence, default value, pipeline retries unchanged
+- `tests/test_db.py` — 2 new: old completed tasks pruned, running tasks never pruned
+
+**Modified files:**
+- `bot/handlers.py` — pipeline timeout, error sanitization, cancel feedback, file upload preservation, rate-limited message sending
+- `tools/claude_client.py` — event loop guard, API_MAX_RETRIES
+- `brain/nodes/executor.py` — UUID filenames for UI/frontend
+- `brain/nodes/deliverer.py` — UUID filenames for code artifacts, better fallback response
+- `storage/db.py` — tasks table pruning in `prune_old_data()`
+- `config.py` — `API_MAX_RETRIES`, section reorganization
+
+**Test suite:** 308 tests (298 passed + 10 skipped). 10 skipped tests require Docker Desktop.
 
 ### v6.9 - 2026-02-21 - Comprehensive Artifact Filtering & Delivery Resilience
 

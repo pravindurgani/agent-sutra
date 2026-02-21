@@ -143,3 +143,20 @@ class TestThinkingTokenTracking:
                 config.DAILY_BUDGET_USD = original_daily
         finally:
             self._teardown_temp_db(cc, orig_path, orig_init)
+
+
+class TestApiMaxRetries:
+    """Verify API_MAX_RETRIES is separate from pipeline MAX_RETRIES."""
+
+    def test_api_max_retries_exists(self):
+        """config.API_MAX_RETRIES should be defined and >= MAX_RETRIES."""
+        assert hasattr(config, "API_MAX_RETRIES")
+        assert config.API_MAX_RETRIES >= config.MAX_RETRIES
+
+    def test_api_max_retries_default(self):
+        """Default API_MAX_RETRIES is 5."""
+        assert config.API_MAX_RETRIES == 5
+
+    def test_pipeline_retries_unchanged(self):
+        """Pipeline MAX_RETRIES remains at 3."""
+        assert config.MAX_RETRIES == 3

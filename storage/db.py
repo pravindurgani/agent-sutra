@@ -269,12 +269,24 @@ async def prune_old_data(history_days: int = 30, usage_days: int = 90):
         except Exception:
             usage_deleted = 0  # Table may not exist yet
 
+        # Prune old completed/failed/crashed tasks (keep recent ones for /history)
+        tasks_cutoff = (datetime.now(timezone.utc) - timedelta(days=history_days)).isoformat()
+        try:
+            cursor = await db.execute(
+                "DELETE FROM tasks WHERE status IN ('completed', 'failed', 'crashed', 'cancelled') "
+                "AND created_at < ?",
+                (tasks_cutoff,),
+            )
+            tasks_deleted = cursor.rowcount
+        except Exception:
+            tasks_deleted = 0
+
         await db.commit()
 
-    if history_deleted or usage_deleted:
+    if history_deleted or usage_deleted or tasks_deleted:
         logger.info(
-            "Storage cleanup: pruned %d history records (>%dd), %d usage records (>%dd)",
-            history_deleted, history_days, usage_deleted, usage_days,
+            "Storage cleanup: pruned %d history, %d usage, %d task records",
+            history_deleted, usage_deleted, tasks_deleted,
         )
 
 

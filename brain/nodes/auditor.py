@@ -246,11 +246,13 @@ _ENV_ERROR_PATTERNS = [
     ("can't initialize sys standard streams", "Python stdin/stdout initialisation failed (daemon context)"),
     ("Bad file descriptor", "Invalid file descriptor inherited from parent process"),
     # Sandbox execution failures
-    ("Permission denied", "Filesystem permission error in sandbox"),
     ("No space left on device", "Disk full"),
     # Network unreachable in sandbox
     ("Name or service not known", "DNS resolution failed (no network access)"),
-    ("Connection refused", "Target service not running"),
+    # NOTE: "Permission denied" and "Connection refused" intentionally excluded.
+    # These are frequently code-level errors (wrong path, wrong port) that the
+    # audit-retry loop CAN fix. Only truly unrecoverable infrastructure failures
+    # belong here.
 ]
 
 

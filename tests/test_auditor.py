@@ -105,10 +105,6 @@ class TestEnvironmentErrorDetection:
         assert desc is not None
         assert "daemon" in desc.lower() or "stdin" in desc.lower()
 
-    def test_permission_denied_detected(self):
-        result = "Execution: FAILED\nStderr:\nPermission denied: /private/var/output"
-        assert _detect_environment_error(result) is not None
-
     def test_no_space_detected(self):
         result = "Execution: FAILED\nStderr:\nNo space left on device"
         assert _detect_environment_error(result) is not None
@@ -117,9 +113,15 @@ class TestEnvironmentErrorDetection:
         result = "Execution: FAILED\nStderr:\nName or service not known"
         assert _detect_environment_error(result) is not None
 
-    def test_connection_refused_detected(self):
+    def test_permission_denied_not_detected(self):
+        """Permission denied is a code-level error (wrong path) — retries CAN fix it."""
+        result = "Execution: FAILED\nStderr:\nPermission denied: /private/var/output"
+        assert _detect_environment_error(result) is None
+
+    def test_connection_refused_not_detected(self):
+        """Connection refused is a code-level error (wrong port) — retries CAN fix it."""
         result = "Execution: FAILED\nStderr:\nConnection refused"
-        assert _detect_environment_error(result) is not None
+        assert _detect_environment_error(result) is None
 
     def test_code_error_not_detected(self):
         result = "Execution: FAILED (exit code 1)\nTraceback:\nZeroDivisionError: division by zero"

@@ -1,4 +1,4 @@
-"""Tests for brain/nodes/executor.py — code block extraction, timeout estimation, param extraction."""
+"""Tests for brain/nodes/executor.py — code block extraction, timeout estimation, param extraction, dep bootstrap."""
 from __future__ import annotations
 
 import sys
@@ -7,8 +7,13 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import config
+from pathlib import Path
 from unittest.mock import patch
-from brain.nodes.executor import _strip_markdown_blocks, _estimate_timeout, _extract_params
+from brain.nodes.executor import (
+    _strip_markdown_blocks, _estimate_timeout, _extract_params,
+    _bootstrap_project_deps, _parse_import_error_from_result,
+)
+from tools.sandbox import ExecutionResult
 
 
 class TestStripMarkdownBlocks:
@@ -150,3 +155,122 @@ class TestExtractParams:
         with patch("brain.nodes.executor.claude_client.call", return_value="I cannot determine the parameters"):
             params = _extract_params(state)
         assert params.get("file") == "/tmp/upload.xlsx"
+
+
+# ── _parse_import_error_from_result (v6.11) ──────────────────────
+
+
+class TestParseImportErrorFromResult:
+    """Extract missing module from ExecutionResult and map to pip name."""
+
+    def test_module_not_found(self):
+        result = ExecutionResult(success=False, traceback="ModuleNotFoundError: No module named 'pandas'")
+        assert _parse_import_error_from_result(result) == "pandas"
+
+    def test_import_error(self):
+        result = ExecutionResult(success=False, stderr="ImportError: No module named 'requests'")
+        assert _parse_import_error_from_result(result) == "requests"
+
+    def test_mapped_module_pil(self):
+        result = ExecutionResult(success=False, traceback="ModuleNotFoundError: No module named 'PIL'")
+        assert _parse_import_error_from_result(result) == "Pillow"
+
+    def test_mapped_module_dotenv(self):
+        result = ExecutionResult(success=False, traceback="ModuleNotFoundError: No module named 'dotenv'")
+        assert _parse_import_error_from_result(result) == "python-dotenv"
+
+    def test_mapped_module_cv2(self):
+        result = ExecutionResult(success=False, traceback="ModuleNotFoundError: No module named 'cv2'")
+        assert _parse_import_error_from_result(result) == "opencv-python"
+
+    def test_mapped_module_attr(self):
+        """attr must map to attrs, not the abandoned 'attr' package."""
+        result = ExecutionResult(success=False, traceback="ModuleNotFoundError: No module named 'attr'")
+        assert _parse_import_error_from_result(result) == "attrs"
+
+    def test_mapped_module_bio(self):
+        result = ExecutionResult(success=False, traceback="ModuleNotFoundError: No module named 'Bio'")
+        assert _parse_import_error_from_result(result) == "biopython"
+
+    def test_uses_canonical_pip_map(self):
+        """Executor must use the same _PIP_NAME_MAP as sandbox.py (no drift)."""
+        from tools.sandbox import _PIP_NAME_MAP
+        # Verify the executor actually imports from sandbox, not a local copy
+        result = ExecutionResult(success=False, traceback="ModuleNotFoundError: No module named 'serial'")
+        assert _parse_import_error_from_result(result) == _PIP_NAME_MAP["serial"]
+
+    def test_no_import_error(self):
+        result = ExecutionResult(success=False, traceback="ZeroDivisionError: division by zero")
+        assert _parse_import_error_from_result(result) is None
+
+    def test_empty_result(self):
+        result = ExecutionResult(success=False, traceback="", stderr="")
+        assert _parse_import_error_from_result(result) is None
+
+    def test_prefers_traceback_over_stderr(self):
+        """When both traceback and stderr have content, traceback is checked."""
+        result = ExecutionResult(
+            success=False,
+            traceback="ModuleNotFoundError: No module named 'yaml'",
+            stderr="some other noise",
+        )
+        assert _parse_import_error_from_result(result) == "pyyaml"
+
+    def test_falls_back_to_stderr(self):
+        """When traceback is empty, stderr is checked."""
+        result = ExecutionResult(
+            success=False,
+            traceback="",
+            stderr="ModuleNotFoundError: No module named 'sklearn'",
+        )
+        assert _parse_import_error_from_result(result) == "scikit-learn"
+
+
+# ── _bootstrap_project_deps (v6.11) ──────────────────────────────
+
+
+class TestBootstrapProjectDeps:
+    """Dependency bootstrapping before project execution."""
+
+    def test_no_requirements_file(self, tmp_path):
+        """Returns None when no requirements.txt exists."""
+        result = _bootstrap_project_deps(str(tmp_path))
+        assert result is None
+
+    def test_successful_bootstrap(self, tmp_path):
+        """Returns None (success) when pip install succeeds."""
+        req = tmp_path / "requirements.txt"
+        req.write_text("requests\n")
+
+        with patch("brain.nodes.executor.run_shell") as mock_shell:
+            mock_shell.return_value = ExecutionResult(success=True)
+            result = _bootstrap_project_deps(str(tmp_path))
+
+        assert result is None
+        mock_shell.assert_called_once()
+        call_args = mock_shell.call_args
+        assert "pip3 install -r" in call_args[0][0] or "pip3 install -r" in call_args.kwargs.get("command", call_args[0][0])
+
+    def test_failed_bootstrap_returns_error(self, tmp_path):
+        """Returns error string when pip install fails."""
+        req = tmp_path / "requirements.txt"
+        req.write_text("nonexistent-package-xyz\n")
+
+        with patch("brain.nodes.executor.run_shell") as mock_shell:
+            mock_shell.return_value = ExecutionResult(success=False, stderr="No matching distribution found")
+            result = _bootstrap_project_deps(str(tmp_path))
+
+        assert result is not None
+        assert "Failed to install" in result
+
+    def test_uses_venv_pip(self, tmp_path):
+        """Uses venv pip when venv_path is provided."""
+        req = tmp_path / "requirements.txt"
+        req.write_text("requests\n")
+
+        with patch("brain.nodes.executor.run_shell") as mock_shell:
+            mock_shell.return_value = ExecutionResult(success=True)
+            _bootstrap_project_deps(str(tmp_path), venv_path="/path/to/venv")
+
+        call_cmd = mock_shell.call_args[0][0]
+        assert "/path/to/venv/bin/pip" in call_cmd

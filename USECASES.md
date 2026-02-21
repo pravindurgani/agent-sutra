@@ -2,7 +2,7 @@
 
 **Status: GOD MODE ACHIEVED**
 
-AgentCore is a fully autonomous AI agent system controlled via Telegram, running on Mac Mini M2. It combines Claude Sonnet 4.6 (generation) + Claude Opus 4.6 (adversarial auditing) with unrestricted shell access, full internet, local AI orchestration, big data processing, and production frontend generation — all from your phone. Hardened with budget enforcement, RAM guards, rate limiting, 34-pattern command blocklist, code content scanner, pattern-based credential filtering, parameter injection prevention, optional Docker container isolation for code execution, process group kill on timeout, fail-safe audit defaults, pipeline-level timeouts, error sanitization, environment error detection, project dependency bootstrapping, and 310 automated tests.
+AgentCore is a fully autonomous AI agent system controlled via Telegram, running on Mac Mini M2. It combines Claude Sonnet 4.6 (generation) + Claude Opus 4.6 (adversarial auditing) with unrestricted shell access, full internet, local AI orchestration, big data processing, and production frontend generation — all from your phone. Hardened with budget enforcement, RAM guards, rate limiting, 34-pattern command blocklist, code content scanner, pattern-based credential filtering, parameter injection prevention, optional Docker container isolation for code execution, process group kill on timeout, fail-safe audit defaults, pipeline-level timeouts, error sanitization, environment error detection, project dependency bootstrapping, and 326 automated tests.
 
 ---
 
@@ -44,7 +44,7 @@ God Mode = the agent has the same power level as you sitting at the terminal, bu
 | Rate limiting | YES | 5-second per-user cooldown between task submissions |
 | Storage auto-cleanup | YES | Prunes old data (30d/90d) and workspace files (7d) on startup |
 | Monthly maintenance cron | YES | SQLite VACUUM, pip-cache cleanup, Docker prune — launchd scheduled |
-| 310 automated tests | YES | Unit + integration + handler + e2e artifact delivery tests with mocked pipeline |
+| 326 automated tests | YES | Unit + integration + handler + e2e artifact delivery tests with mocked pipeline |
 | Docker container isolation | YES | Optional: isolates run_code() in disposable containers, host filesystem inaccessible |
 | Docker network isolation | YES | `DOCKER_NETWORK=none` for airgapped execution of sensitive data tasks |
 
@@ -651,4 +651,4 @@ The job survives bot restarts via APScheduler SQLite persistence.
          Internet | Ollama | ~/ filesystem | Any shell command
 ```
 
-**320 tests (310 passed + 10 skipped). 10 skipped tests require Docker Desktop. Zero known bugs. Production-ready.**
+**336 tests (326 passed + 10 skipped). 10 skipped tests require Docker Desktop. Zero known bugs. Production-ready.**

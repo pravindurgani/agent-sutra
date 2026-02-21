@@ -10,7 +10,7 @@ from pathlib import Path
 import config
 from brain.state import AgentState
 from tools import claude_client
-from tools.sandbox import run_code, run_code_with_auto_install, run_shell, ExecutionResult
+from tools.sandbox import run_code, run_code_with_auto_install, run_shell, ExecutionResult, _PIP_NAME_MAP
 from tools.file_manager import get_file_content
 
 logger = logging.getLogger(__name__)
@@ -198,7 +198,11 @@ def _bootstrap_project_deps(project_path: str, venv_path: str | None = None) -> 
 
 
 def _parse_import_error_from_result(result: ExecutionResult) -> str | None:
-    """Extract missing module from a failed execution result."""
+    """Extract missing module from a failed execution result.
+
+    Uses _PIP_NAME_MAP from sandbox.py (single source of truth for
+    import-name → pip-name mappings) to avoid drift between the two modules.
+    """
     error_text = result.traceback or result.stderr or ""
     if not error_text:
         return None
@@ -206,10 +210,7 @@ def _parse_import_error_from_result(result: ExecutionResult) -> str | None:
     if not match:
         return None
     module = match.group(1)
-    PIP_MAP = {"PIL": "Pillow", "cv2": "opencv-python", "bs4": "beautifulsoup4",
-               "yaml": "pyyaml", "sklearn": "scikit-learn", "dateutil": "python-dateutil",
-               "dotenv": "python-dotenv"}
-    return PIP_MAP.get(module, module)
+    return _PIP_NAME_MAP.get(module, module)
 
 
 def _execute_project(state: AgentState) -> dict:

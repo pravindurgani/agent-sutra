@@ -1,6 +1,6 @@
 # AgentCore v6.11 - Complete Project Documentation
 
-A Telegram-driven AI agent server running on Mac Mini M2 (16GB). Receives tasks via Telegram, processes them through a LangGraph Plan-Execute-Audit pipeline powered by Claude API, and delivers results back. Features: project registry, cross-model adversarial auditing (Sonnet+Opus), full internet access, local AI orchestration (Ollama), big data processing, production frontend generation, Docker container isolation for code execution, 7 task types, 11 commands, budget enforcement, RAM guards, code content scanner, 34-pattern command blocklist, environment error detection, project dependency bootstrapping, and 310 automated tests.
+A Telegram-driven AI agent server running on Mac Mini M2 (16GB). Receives tasks via Telegram, processes them through a LangGraph Plan-Execute-Audit pipeline powered by Claude API, and delivers results back. Features: project registry, cross-model adversarial auditing (Sonnet+Opus), full internet access, local AI orchestration (Ollama), big data processing, production frontend generation, Docker container isolation for code execution, 7 task types, 11 commands, budget enforcement, RAM guards, code content scanner, 34-pattern command blocklist, environment error detection, project dependency bootstrapping, and 326 automated tests.
 
 **Last updated:** 2026-02-21
 
@@ -1365,16 +1365,17 @@ Fixes 3 critical/medium issues identified from production failures: "Bad file de
 - When detected, auditor forces `retry_count = MAX_RETRIES` (skips to delivery) instead of wasting 9 API calls on code-level retries
 - User gets a clear "ENVIRONMENT ERROR" message via the fallback response path
 
-**New tests (12 new, 310 total):**
+**New tests (28 new, 326 total):**
 - `tests/test_sandbox.py` — 2 new: stdin-safe run_code, stdin-safe run_shell
-- `tests/test_auditor.py` — 10 new: bad file descriptor detection, sys streams detection, permission denied, no space, DNS failure, connection refused, code errors not false-positive, import errors not false-positive, empty result, env error forces max retries
+- `tests/test_auditor.py` — 10 new: bad file descriptor, sys streams, no space, DNS failure, permission denied NOT detected (false-positive guard), connection refused NOT detected (false-positive guard), code errors not detected, import errors not detected, empty result, env error forces max retries
+- `tests/test_executor.py` — 16 new: _parse_import_error_from_result (12 tests covering mapped modules, canonical PIP_MAP reuse, traceback vs stderr precedence, empty/no-match cases), _bootstrap_project_deps (4 tests covering no requirements, success, failure, venv pip)
 
 **Modified files:**
 - `tools/sandbox.py` — `stdin=subprocess.DEVNULL` on all 11 subprocess calls
-- `brain/nodes/executor.py` — dependency bootstrapping, auto-install retry, prompt hardening
-- `brain/nodes/auditor.py` — environment error detection and retry short-circuit
+- `brain/nodes/executor.py` — dependency bootstrapping, auto-install retry, prompt hardening, imports `_PIP_NAME_MAP` from sandbox (single source of truth)
+- `brain/nodes/auditor.py` — environment error detection and retry short-circuit; "Permission denied" and "Connection refused" removed (false-positive risk)
 
-**Test suite:** 310 tests (300 passed + 10 skipped). 10 skipped tests require Docker Desktop.
+**Test suite:** 326 tests (316 passed + 10 skipped). 10 skipped tests require Docker Desktop.
 
 ### v6.10 - 2026-02-21 - Pipeline Audit Fixes & Operational Hardening
 

@@ -15,6 +15,7 @@ from tools.sandbox import (
     _extract_traceback,
     _filter_env,
     _is_artifact_file,
+    _extract_paths_from_stdout,
     _PIP_NAME_MAP,
 )
 from pathlib import Path
@@ -707,3 +708,65 @@ class TestArtifactFilter:
 
     def test_python_script_accepted(self):
         assert _is_artifact_file(Path("/project/script.py")) is True
+
+
+# ── Stdout fallback artifact detection ─────────────────────────────
+
+
+class TestStdoutFallback:
+    """_extract_paths_from_stdout must find real file paths in command output."""
+
+    def test_absolute_path_found(self, tmp_path):
+        """Absolute path in stdout that exists on disk is detected."""
+        f = tmp_path / "report.html"
+        f.write_text("<html>done</html>")
+        stdout = f"HTML saved: {f}\nDone."
+        result = _extract_paths_from_stdout(stdout, tmp_path)
+        assert str(f) in result
+
+    def test_relative_path_found(self, tmp_path):
+        """Relative path in stdout resolved against working_dir."""
+        subdir = tmp_path / "app" / "output"
+        subdir.mkdir(parents=True)
+        f = subdir / "report.pdf"
+        f.write_bytes(b"%PDF-fake")
+        stdout = "PDF saved: app/output/report.pdf\n"
+        result = _extract_paths_from_stdout(stdout, tmp_path)
+        assert str(f.resolve()) in [str(Path(r).resolve()) for r in result]
+
+    def test_nonexistent_path_ignored(self, tmp_path):
+        """Path in stdout that doesn't exist is NOT returned."""
+        stdout = f"Saved: {tmp_path}/ghost.html\n"
+        result = _extract_paths_from_stdout(stdout, tmp_path)
+        assert len(result) == 0
+
+    def test_pyc_path_ignored(self, tmp_path):
+        """Even if .pyc path is in stdout, it's filtered out."""
+        f = tmp_path / "__pycache__" / "mod.cpython-311.pyc"
+        f.parent.mkdir()
+        f.write_bytes(b"\x00")
+        stdout = f"Compiled: {f}\n"
+        result = _extract_paths_from_stdout(stdout, tmp_path)
+        assert len(result) == 0
+
+    def test_multiple_paths_deduped(self, tmp_path):
+        """Same path mentioned twice in stdout is returned once."""
+        f = tmp_path / "output.csv"
+        f.write_text("a,b,c")
+        stdout = f"Wrote: {f}\nAlso: {f}\n"
+        result = _extract_paths_from_stdout(stdout, tmp_path)
+        assert len(result) == 1
+
+    def test_empty_stdout(self, tmp_path):
+        """Empty stdout returns empty list."""
+        assert _extract_paths_from_stdout("", tmp_path) == []
+        assert _extract_paths_from_stdout("no file paths here", tmp_path) == []
+
+    def test_mixed_real_and_fake_paths(self, tmp_path):
+        """Only paths that exist on disk are returned."""
+        real = tmp_path / "result.json"
+        real.write_text('{"ok": true}')
+        stdout = f"Output: {real}\nAlso: {tmp_path}/missing.json\n"
+        result = _extract_paths_from_stdout(stdout, tmp_path)
+        assert str(real) in result
+        assert len(result) == 1

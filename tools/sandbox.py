@@ -326,6 +326,13 @@ def _run_code_docker(
                 prev_mtime = existing_mtimes.get(f)
                 if prev_mtime is None or f.stat().st_mtime > prev_mtime:
                     new_files.append(str(f))
+
+        # Fallback: if mtime found nothing but execution succeeded, parse stdout for file paths
+        if not new_files and result.returncode == 0 and result.stdout:
+            new_files = _extract_paths_from_stdout(result.stdout, working_dir)
+            if new_files:
+                logger.info("Artifacts detected via stdout fallback: %s", [Path(f).name for f in new_files])
+
         if new_files:
             logger.info("Artifacts detected: %s", [Path(f).name for f in new_files])
         else:
@@ -408,6 +415,53 @@ def _is_artifact_file(path: Path) -> bool:
     if name == ".DS_Store":
         return False
     return True
+
+
+# Common output file extensions for stdout fallback detection
+_OUTPUT_EXTENSIONS = {
+    ".html", ".pdf", ".csv", ".xlsx", ".xls", ".json", ".xml",
+    ".png", ".jpg", ".jpeg", ".gif", ".svg",
+    ".txt", ".md", ".zip", ".tar", ".gz",
+    ".py", ".js", ".css", ".parquet",
+}
+
+
+def _extract_paths_from_stdout(stdout: str, working_dir: Path) -> list[str]:
+    """Extract file paths mentioned in stdout that exist on disk.
+
+    Universal fallback when mtime-based detection finds 0 files.
+    Looks for absolute paths and relative paths (resolved against working_dir)
+    that actually exist and have a recognized output extension.
+    """
+    if not stdout:
+        return []
+
+    found = []
+    seen = set()
+
+    # 1. Match absolute paths (any Unix-style path starting with /)
+    for match in re.finditer(r'(/[^\s:,\'">\]]+)', stdout):
+        candidate = match.group(0).rstrip('.,;:)]\'"')
+        p = Path(candidate)
+        if p.suffix.lower() in _OUTPUT_EXTENSIONS and p.is_file() and _is_artifact_file(p):
+            resolved = str(p.resolve())
+            if resolved not in seen:
+                seen.add(resolved)
+                found.append(str(p))
+
+    # 2. Match relative paths with output extensions (resolve against working_dir)
+    for match in re.finditer(r'([\w./\\-]+\.(?:' + '|'.join(ext.lstrip('.') for ext in _OUTPUT_EXTENSIONS) + r'))\b', stdout):
+        candidate = match.group(1)
+        if candidate.startswith('/'):
+            continue  # Already handled above
+        p = (working_dir / candidate).resolve()
+        if p.is_file() and _is_artifact_file(p):
+            resolved = str(p)
+            if resolved not in seen:
+                seen.add(resolved)
+                found.append(str(p))
+
+    return found
 
 
 @dataclass
@@ -511,6 +565,13 @@ def run_code(
                 prev_mtime = existing_mtimes.get(f)
                 if prev_mtime is None or f.stat().st_mtime > prev_mtime:
                     new_files.append(str(f))
+
+        # Fallback: if mtime found nothing but execution succeeded, parse stdout for file paths
+        if not new_files and proc.returncode == 0 and stdout:
+            new_files = _extract_paths_from_stdout(stdout, working_dir)
+            if new_files:
+                logger.info("Artifacts detected via stdout fallback: %s", [Path(f).name for f in new_files])
+
         if new_files:
             logger.info("Artifacts detected: %s", [Path(f).name for f in new_files])
         else:
@@ -668,6 +729,13 @@ def run_shell(
                 prev_mtime = existing_mtimes.get(f)
                 if prev_mtime is None or f.stat().st_mtime > prev_mtime:
                     new_files.append(str(f))
+
+        # Fallback: if mtime found nothing but execution succeeded, parse stdout for file paths
+        if not new_files and proc.returncode == 0 and stdout:
+            new_files = _extract_paths_from_stdout(stdout, working_dir)
+            if new_files:
+                logger.info("Artifacts detected via stdout fallback: %s", [Path(f).name for f in new_files])
+
         if new_files:
             logger.info("Artifacts detected: %s", [Path(f).name for f in new_files])
         else:

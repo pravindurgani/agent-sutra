@@ -462,7 +462,11 @@ async def _scheduled_task_run(chat_id: int, user_id: int, task_message: str):
             await bot.send_message(chat_id=chat_id, text=f"[Scheduled] {response[:4000]}")
 
             artifacts = result.get("artifacts", [])
+            seen_paths = set()
             for fpath in artifacts:
+                if fpath in seen_paths:
+                    continue
+                seen_paths.add(fpath)
                 p = Path(fpath)
                 if not p.is_file():
                     logger.warning("Scheduled artifact not found, skipping: %s", fpath)
@@ -589,8 +593,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as ctx_err:
             logger.warning("Failed to save conversation context: %s", ctx_err)
 
-        # Send artifact files
+        # Send artifact files (deduplicated)
+        seen_paths = set()
         for fpath in result.get("artifacts", []):
+            if fpath in seen_paths:
+                continue
+            seen_paths.add(fpath)
             p = Path(fpath)
             if not p.is_file():
                 logger.warning("Artifact not found, skipping: %s", fpath)

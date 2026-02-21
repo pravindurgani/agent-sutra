@@ -35,10 +35,10 @@ def deliver(state: AgentState) -> dict:
     retry_count = state.get("retry_count", 0)
     artifacts = list(state.get("artifacts", []))
 
-    # Save generated code as a file attachment (for code tasks)
-    if task_type in ("code", "automation", "data", "file") and state.get("code"):
+    # Save generated code as a file attachment (only on successful execution)
+    if task_type in ("code", "automation", "data", "file") and state.get("code") and verdict == "pass":
         code_file = _save_code_artifact(state)
-        if code_file:
+        if code_file and code_file not in artifacts:
             artifacts.append(code_file)
 
     # Build context for the summary generator

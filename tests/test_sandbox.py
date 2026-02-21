@@ -564,3 +564,101 @@ class TestCodeContentScanner:
     def test_subprocess_pip_allowed(self):
         code = 'subprocess.run(["pip3", "install", "pandas"])'
         assert _check_code_safety(code) is None
+
+
+# ── File detection (mtime-aware snapshot) ─────────────────────────
+
+
+class TestFileDetection:
+    """run_code and run_shell must detect both new AND overwritten files.
+
+    Uses a temp dir inside HOME to pass working-dir validation.
+    """
+
+    @staticmethod
+    def _make_home_tmp():
+        """Create a temp dir under HOME that passes sandbox validation."""
+        import tempfile
+        d = Path(tempfile.mkdtemp(dir=config.HOST_HOME / "Desktop"))
+        return d
+
+    @staticmethod
+    def _cleanup(d: Path):
+        import shutil
+        shutil.rmtree(d, ignore_errors=True)
+
+    def test_run_code_detects_new_file(self):
+        """A file that didn't exist before execution is detected."""
+        from tools.sandbox import run_code
+        d = self._make_home_tmp()
+        try:
+            code = "with open('output.txt', 'w') as f: f.write('hello')"
+            result = run_code(code, "python", working_dir=d, timeout=10)
+            assert result.success
+            names = [Path(f).name for f in result.files_created]
+            assert "output.txt" in names
+        finally:
+            self._cleanup(d)
+
+    def test_run_code_detects_overwritten_file(self):
+        """A file that existed before but was overwritten is detected via mtime."""
+        from tools.sandbox import run_code
+        import time
+        d = self._make_home_tmp()
+        try:
+            existing = d / "report.txt"
+            existing.write_text("old content")
+            time.sleep(0.05)  # Ensure mtime difference
+            code = "with open('report.txt', 'w') as f: f.write('new content')"
+            result = run_code(code, "python", working_dir=d, timeout=10)
+            assert result.success
+            names = [Path(f).name for f in result.files_created]
+            assert "report.txt" in names
+        finally:
+            self._cleanup(d)
+
+    def test_run_shell_detects_new_file(self):
+        """run_shell detects newly created files."""
+        from tools.sandbox import run_shell
+        d = self._make_home_tmp()
+        try:
+            result = run_shell("echo hello > new_file.txt", working_dir=d, timeout=10)
+            assert result.success
+            names = [Path(f).name for f in result.files_created]
+            assert "new_file.txt" in names
+        finally:
+            self._cleanup(d)
+
+    def test_run_shell_detects_overwritten_file(self):
+        """run_shell detects files overwritten during execution via mtime."""
+        from tools.sandbox import run_shell
+        import time
+        d = self._make_home_tmp()
+        try:
+            existing = d / "data.csv"
+            existing.write_text("old,data")
+            time.sleep(0.05)
+            result = run_shell("echo 'new,data' > data.csv", working_dir=d, timeout=10)
+            assert result.success
+            names = [Path(f).name for f in result.files_created]
+            assert "data.csv" in names
+        finally:
+            self._cleanup(d)
+
+    def test_untouched_file_not_detected(self):
+        """A pre-existing file that was NOT touched should NOT appear in files_created."""
+        from tools.sandbox import run_code
+        import time
+        d = self._make_home_tmp()
+        try:
+            existing = d / "untouched.txt"
+            existing.write_text("leave me alone")
+            time.sleep(0.05)
+            code = "with open('other.txt', 'w') as f: f.write('new')"
+            result = run_code(code, "python", working_dir=d, timeout=10)
+            assert result.success
+            names = [Path(f).name for f in result.files_created]
+            assert "other.txt" in names
+            assert "untouched.txt" not in names
+        finally:
+            self._cleanup(d)

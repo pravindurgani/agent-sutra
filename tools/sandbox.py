@@ -286,7 +286,15 @@ def _run_code_docker(
 
     working_dir.mkdir(parents=True, exist_ok=True)
 
-    existing_files = set(working_dir.rglob("*")) if working_dir.exists() else set()
+    # Track path→mtime to detect both new AND modified files (e.g. overwritten on retry)
+    existing_mtimes = {}
+    if working_dir.exists():
+        for f in working_dir.rglob("*"):
+            if f.is_file():
+                try:
+                    existing_mtimes[f] = f.stat().st_mtime
+                except OSError:
+                    pass
 
     suffix = {"python": ".py", "javascript": ".js", "bash": ".sh"}.get(language, ".py")
     container_name = f"agentcore-{uuid.uuid4().hex[:12]}"
@@ -312,11 +320,12 @@ def _run_code_docker(
             cmd, capture_output=True, text=True, timeout=timeout,
         )
 
-        current_files = set(working_dir.rglob("*"))
-        new_files = [
-            str(f) for f in (current_files - existing_files)
-            if f != script_path and f.is_file()
-        ]
+        new_files = []
+        for f in working_dir.rglob("*"):
+            if f.is_file() and f != script_path:
+                prev_mtime = existing_mtimes.get(f)
+                if prev_mtime is None or f.stat().st_mtime > prev_mtime:
+                    new_files.append(str(f))
         tb = _extract_traceback(result.stderr) if result.returncode != 0 else ""
 
         return ExecutionResult(
@@ -428,7 +437,15 @@ def run_code(
 
     working_dir.mkdir(parents=True, exist_ok=True)
 
-    existing_files = set(working_dir.rglob("*")) if working_dir.exists() else set()
+    # Track path→mtime to detect both new AND modified files (e.g. overwritten on retry)
+    existing_mtimes = {}
+    if working_dir.exists():
+        for f in working_dir.rglob("*"):
+            if f.is_file():
+                try:
+                    existing_mtimes[f] = f.stat().st_mtime
+                except OSError:
+                    pass
 
     suffix = {"python": ".py", "javascript": ".js", "bash": ".sh"}.get(language, ".py")
 
@@ -469,8 +486,12 @@ def run_code(
             logger.warning("Execution timed out after %ds, killed process group %d", timeout, proc.pid)
             return ExecutionResult(success=False, stderr=f"Execution timed out after {timeout}s", timed_out=True)
 
-        current_files = set(working_dir.rglob("*"))
-        new_files = [str(f) for f in (current_files - existing_files) if f != script_path and f.is_file()]
+        new_files = []
+        for f in working_dir.rglob("*"):
+            if f.is_file() and f != script_path:
+                prev_mtime = existing_mtimes.get(f)
+                if prev_mtime is None or f.stat().st_mtime > prev_mtime:
+                    new_files.append(str(f))
         tb = _extract_traceback(stderr) if proc.returncode != 0 else ""
 
         return ExecutionResult(
@@ -592,7 +613,14 @@ def run_shell(
     if env_vars:
         env.update(env_vars)
 
-    existing_files = set(working_dir.rglob("*"))
+    # Track path→mtime to detect both new AND modified files (e.g. overwritten on retry)
+    existing_mtimes = {}
+    for f in working_dir.rglob("*"):
+        if f.is_file():
+            try:
+                existing_mtimes[f] = f.stat().st_mtime
+            except OSError:
+                pass
 
     logger.info("Shell exec: %s (cwd=%s, timeout=%ds)", command[:200], working_dir, timeout)
 
@@ -611,8 +639,12 @@ def run_shell(
             logger.warning("Shell command timed out after %ds, killed process group %d", timeout, proc.pid)
             return ExecutionResult(success=False, stderr=f"Timed out after {timeout}s", timed_out=True)
 
-        current_files = set(working_dir.rglob("*"))
-        new_files = [str(f) for f in (current_files - existing_files) if f.is_file()]
+        new_files = []
+        for f in working_dir.rglob("*"):
+            if f.is_file():
+                prev_mtime = existing_mtimes.get(f)
+                if prev_mtime is None or f.stat().st_mtime > prev_mtime:
+                    new_files.append(str(f))
         tb = _extract_traceback(stderr) if proc.returncode != 0 else ""
 
         return ExecutionResult(

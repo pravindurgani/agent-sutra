@@ -464,7 +464,11 @@ async def _scheduled_task_run(chat_id: int, user_id: int, task_message: str):
             artifacts = result.get("artifacts", [])
             for fpath in artifacts:
                 p = Path(fpath)
-                if p.is_file() and p.stat().st_size < config.MAX_FILE_SIZE_BYTES:
+                if not p.is_file():
+                    logger.warning("Scheduled artifact not found, skipping: %s", fpath)
+                elif p.stat().st_size >= config.MAX_FILE_SIZE_BYTES:
+                    logger.warning("Scheduled artifact too large (%d bytes), skipping: %s", p.stat().st_size, fpath)
+                else:
                     with open(p, "rb") as f:
                         await bot.send_document(chat_id=chat_id, document=f, filename=p.name)
 
@@ -588,7 +592,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Send artifact files
         for fpath in result.get("artifacts", []):
             p = Path(fpath)
-            if p.is_file() and p.stat().st_size < config.MAX_FILE_SIZE_BYTES:
+            if not p.is_file():
+                logger.warning("Artifact not found, skipping: %s", fpath)
+            elif p.stat().st_size >= config.MAX_FILE_SIZE_BYTES:
+                logger.warning("Artifact too large (%d bytes), skipping: %s", p.stat().st_size, fpath)
+            else:
                 with open(p, "rb") as f:
                     await update.message.reply_document(document=f, filename=p.name)
 

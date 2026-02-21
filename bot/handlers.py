@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 
 from telegram import Update, Bot
 from telegram.ext import ContextTypes
-from telegram.constants import ChatAction
 
 import config
 from brain.graph import run_task, get_stage, clear_stage

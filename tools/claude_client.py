@@ -176,9 +176,11 @@ def call(
             # Extended thinking mode — adaptive thinking for supported models
             if thinking and config.ENABLE_THINKING:
                 kwargs["thinking"] = {"type": "adaptive"}
-                # Thinking mode requires generous max_tokens and NO temperature
-                if kwargs["max_tokens"] < 16000:
-                    kwargs["max_tokens"] = 16000
+                # max_tokens is the TOTAL budget for thinking + text combined.
+                # If too low, Claude can consume it all on thinking and return
+                # zero text blocks. Floor at 128000 to guarantee text headroom.
+                if kwargs["max_tokens"] < 128000:
+                    kwargs["max_tokens"] = 128000
                 # Do NOT set temperature when thinking is enabled (API requirement)
             else:
                 kwargs["temperature"] = temperature

@@ -223,7 +223,7 @@ def plan(state: AgentState) -> dict:
         prompt += "\nRevise the plan to fix these specific issues."
 
     # Enable thinking only for tasks that genuinely benefit from deep reasoning
-    use_thinking = task_type in ("frontend", "ui_design", "project")
+    use_thinking = task_type in ("frontend", "ui_design")
     response = claude_client.call(prompt, system=system, max_tokens=3000, thinking=use_thinking)
     logger.info("Plan created for task %s (type=%s, %d chars, thinking=%s)", state["task_id"], task_type, len(response), use_thinking)
     return {"plan": response}

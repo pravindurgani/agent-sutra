@@ -67,6 +67,8 @@ CRITICAL RULES:
    Do NOT use ls, find, or grep to locate alternative scripts.
    The provided commands are the ONLY correct way to invoke this project.
 3. Do NOT install packages or write new Python code.
+4. This runs on macOS. Do NOT use GNU-specific commands like `timeout`, `readlink -f`,
+   `sed -i` (without '' argument), `shuf`, or `date -d`. Use POSIX-compatible alternatives.
 
 Write ONLY the bash script. Start with #!/bin/bash and set -e."""
 
@@ -175,8 +177,13 @@ def _bootstrap_project_deps(project_path: str, venv_path: str | None = None) -> 
     dependencies using the project's venv (if configured) or system pip.
     Returns error message on failure, None on success.
     """
-    req_file = Path(project_path) / "requirements.txt"
-    if not req_file.exists():
+    candidates = [
+        Path(project_path) / "requirements.txt",
+        Path(project_path) / "app" / "requirements.txt",
+        Path(project_path) / "requirements" / "base.txt",
+    ]
+    req_file = next((f for f in candidates if f.exists()), None)
+    if not req_file:
         return None  # No requirements file — nothing to bootstrap
 
     pip_bin = f"{venv_path}/bin/pip" if venv_path else "pip3"
@@ -283,7 +290,7 @@ IMPORTANT: Use the filled-in commands above. Do NOT leave {{file}} or {{client}}
     if state.get("audit_feedback"):
         prompt += f"\n\n--- Previous attempt failed ---\n{state['audit_feedback']}"
 
-    code = claude_client.call(prompt, system=SHELL_GEN_SYSTEM, max_tokens=2000, thinking=True)
+    code = claude_client.call(prompt, system=SHELL_GEN_SYSTEM, max_tokens=2000, thinking=False)
     code = _strip_markdown_blocks(code)
 
     if not code.strip():

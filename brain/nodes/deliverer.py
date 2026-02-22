@@ -41,6 +41,10 @@ def deliver(state: AgentState) -> dict:
     retry_count = state.get("retry_count", 0)
     artifacts = list(state.get("artifacts", []))
 
+    # Don't attach files from a failed task — they may be wrong or incomplete
+    if verdict != "pass":
+        artifacts = []
+
     # Save generated code as a file attachment (only on successful execution)
     if task_type in ("code", "automation", "data", "file") and state.get("code") and verdict == "pass":
         code_file = _save_code_artifact(state)

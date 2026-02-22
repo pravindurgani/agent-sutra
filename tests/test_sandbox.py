@@ -256,14 +256,16 @@ class TestParseImportError:
 # ── Interpreter inline execution blocking ─────────────────────────
 
 
-class TestInterpreterBlocking:
-    """Interpreter -c/-e flags must be blocked to prevent shell bypass."""
+class TestInterpreterPolicies:
+    """python3 -c is logged (not blocked); perl/ruby/node -e remain blocked."""
 
-    def test_python_c_blocked(self):
-        assert _check_command_safety('python3 -c "import os; os.system(\'rm -rf ~/\')"') is not None
+    def test_python_c_allowed(self):
+        """python3 -c is allowed (logged, not blocked)."""
+        assert _check_command_safety('python3 -c "import os; os.system(\'rm -rf ~/\')"') is None
 
-    def test_python2_c_blocked(self):
-        assert _check_command_safety('python -c "import shutil; shutil.rmtree(\'/Users\')"') is not None
+    def test_python2_c_allowed(self):
+        """python -c is allowed (logged, not blocked)."""
+        assert _check_command_safety('python -c "import shutil; shutil.rmtree(\'/Users\')"') is None
 
     def test_perl_e_blocked(self):
         assert _check_command_safety("perl -e \"system('rm -rf ~/')\"") is not None

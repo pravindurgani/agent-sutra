@@ -258,11 +258,6 @@ def call(
     raise RuntimeError(f"Claude API failed after {config.API_MAX_RETRIES} attempts")
 
 
-def call_complex(prompt: str, system: str = "", max_tokens: int = 8192, thinking: bool = False) -> str:
-    """Call with the complex/powerful model (Opus) for harder tasks."""
-    return call(prompt, system=system, model=config.COMPLEX_MODEL, max_tokens=max_tokens, thinking=thinking)
-
-
 def get_usage_summary() -> dict:
     """Return total token usage from persistent storage (survives restarts)."""
     _init_usage_db()

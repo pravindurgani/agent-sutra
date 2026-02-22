@@ -149,16 +149,6 @@ async def get_all_context(user_id: int) -> dict[str, str]:
             return {row[0]: row[1] for row in rows}
 
 
-async def delete_context(user_id: int, key: str):
-    """Delete a single context key."""
-    async with aiosqlite.connect(config.DB_PATH, timeout=20.0) as db:
-        await db.execute(
-            "DELETE FROM conversation_context WHERE user_id = ? AND key = ?",
-            (user_id, key),
-        )
-        await db.commit()
-
-
 async def clear_context(user_id: int):
     """Delete all context for a user."""
     async with aiosqlite.connect(config.DB_PATH, timeout=20.0) as db:

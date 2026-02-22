@@ -565,9 +565,12 @@ def _detect_artifacts(
     for f in _walk_artifacts(working_dir):
         if f == exclude_path:
             continue
-        prev_mtime = existing_mtimes.get(f)
-        if prev_mtime is None or f.stat().st_mtime > prev_mtime:
-            new_files.append(str(f))
+        try:
+            prev_mtime = existing_mtimes.get(f)
+            if prev_mtime is None or f.stat().st_mtime > prev_mtime:
+                new_files.append(str(f))
+        except OSError:
+            pass
 
     # Fallback: if mtime found nothing but execution succeeded, parse stdout for file paths
     if not new_files and returncode == 0 and stdout:

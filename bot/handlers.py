@@ -235,7 +235,7 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Ollama
     try:
         import requests
-        resp = requests.get(f"{config.OLLAMA_BASE_URL}/api/tags", timeout=3)
+        resp = await asyncio.to_thread(requests.get, f"{config.OLLAMA_BASE_URL}/api/tags", timeout=3)
         if resp.ok:
             models = [m["name"] for m in resp.json().get("models", [])]
             lines.append(f"Ollama: online ({len(models)} models)")
@@ -303,14 +303,14 @@ async def cmd_exec(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if result.stdout:
             output += result.stdout[:3000]
         if result.stderr:
-            output += f"\n[stderr]\n{result.stderr[:1000]}"
+            output += f"\n[stderr]\n{_sanitize_error_for_user(result.stderr[:1000])}"
         if not output.strip():
             output = "(no output)"
 
         status = "OK" if result.success else f"EXIT {result.return_code}"
         await _send_long_message(update, f"[{status}]\n{output}")
     except Exception as e:
-        await update.message.reply_text(f"Error: {e}")
+        await update.message.reply_text(f"Error: {_sanitize_error_for_user(str(e))}")
 
 
 @auth_required

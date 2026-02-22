@@ -10,7 +10,7 @@ from pathlib import Path
 import config
 from brain.state import AgentState
 from tools import claude_client
-from tools.sandbox import run_code, run_code_with_auto_install, run_shell, ExecutionResult, _PIP_NAME_MAP
+from tools.sandbox import run_code_with_auto_install, run_shell, ExecutionResult, _PIP_NAME_MAP
 from tools.file_manager import get_file_content
 
 logger = logging.getLogger(__name__)

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import csv
 import uuid
-import shutil
 import logging
 from pathlib import Path
 
@@ -30,19 +29,6 @@ def save_upload(data: bytes, filename: str) -> Path:
     dest.write_bytes(data)
     logger.info("Saved upload: %s (%d bytes)", dest.name, len(data))
     return dest
-
-
-def list_outputs() -> list[Path]:
-    """List all files in workspace/outputs."""
-    return [f for f in config.OUTPUTS_DIR.iterdir() if f.is_file()]
-
-
-def clean_outputs():
-    """Remove all files from workspace/outputs."""
-    for f in config.OUTPUTS_DIR.iterdir():
-        if f.is_file():
-            f.unlink()
-    logger.info("Cleaned outputs directory")
 
 
 def get_file_content(path: Path, max_chars: int = 50000) -> str:
@@ -165,8 +151,3 @@ def format_file_metadata_for_prompt(path: Path) -> str:
     return "\n".join(parts)
 
 
-def ensure_project_dir(name: str) -> Path:
-    """Create and return a project subdirectory."""
-    project_dir = config.PROJECTS_DIR / name
-    project_dir.mkdir(parents=True, exist_ok=True)
-    return project_dir

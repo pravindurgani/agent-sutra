@@ -48,7 +48,7 @@ PROTECTED_ENV_KEYS = {"ANTHROPIC_API_KEY", "TELEGRAM_BOT_TOKEN"}
 
 # Pattern-based env filtering: strip any var whose name contains these substrings
 # Catches AWS_SECRET_ACCESS_KEY, GITHUB_TOKEN, DATABASE_PASSWORD, etc.
-PROTECTED_ENV_SUBSTRINGS = {"KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL"}
+PROTECTED_ENV_SUBSTRINGS = {"KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "DATABASE", "AUTH"}
 
 # Model config
 DEFAULT_MODEL = os.getenv("DEFAULT_MODEL", "claude-sonnet-4-6")

@@ -1,4 +1,4 @@
-# AgentCore v6.11 - Complete Project Documentation
+# AgentSutra v6.11 - Complete Project Documentation
 
 A Telegram-driven AI agent server running on Mac Mini M2 (16GB). Receives tasks via Telegram, processes them through a LangGraph Plan-Execute-Audit pipeline powered by Claude API, and delivers results back. Features: project registry, cross-model adversarial auditing (Sonnet+Opus), full internet access, local AI orchestration (Ollama), big data processing, production frontend generation, Docker container isolation for code execution, 7 task types, 11 commands, budget enforcement, RAM guards, code content scanner, 34-pattern command blocklist, environment error detection, project dependency bootstrapping, and 336 automated tests.
 
@@ -10,7 +10,7 @@ A Telegram-driven AI agent server running on Mac Mini M2 (16GB). Receives tasks 
 
 ### Who This Is Built For
 
-AgentCore is a **single-user personal tool** built by and for one developer. It runs on a dedicated Mac Mini M2 sitting in a home office, controlled exclusively via Telegram by one authenticated user ID. It is not a SaaS product, not a multi-tenant platform, and not designed for public-facing deployment.
+AgentSutra is a **single-user personal tool** built by and for one developer. It runs on a dedicated Mac Mini M2 sitting in a home office, controlled exclusively via Telegram by one authenticated user ID. It is not a SaaS product, not a multi-tenant platform, and not designed for public-facing deployment.
 
 The user is the system's owner, operator, and sole consumer. There are no untrusted users, no public API endpoints, no shared infrastructure, and no compliance requirements.
 
@@ -114,7 +114,7 @@ Every architectural decision in this codebase was made through the lens of: **"W
 ## Directory Structure
 
 ```
-AgentCore/
+AgentSutra/
 |-- .env                        # API keys (never commit)
 |-- .env.example                # Template for .env
 |-- main.py                     # Entry point: config validation, boot sequence
@@ -123,8 +123,8 @@ AgentCore/
 |-- projects.yaml               # Project registry (8 projects, triggers, commands)
 |-- Dockerfile                  # Docker sandbox image (Python 3.11 + common packages)
 |-- .dockerignore               # Excludes .env, workspace/, storage/ from Docker build
-|-- agentcore.log               # Runtime log (auto-created)
-|-- AGENTCORE.md                # This documentation file
+|-- agentsutra.log               # Runtime log (auto-created)
+|-- AGENTSUTRA.md                # This documentation file
 |-- USECASES.md                 # Detailed use cases from portfolio
 |-- idea.md                     # Original concept document
 |-- prompt.md                   # Build prompt reference
@@ -156,7 +156,7 @@ AgentCore/
 |-- storage/                    # Persistence layer
 |   |-- __init__.py
 |   |-- db.py                   # SQLite async CRUD via aiosqlite
-|   +-- agentcore.db            # SQLite database (auto-created, also stores scheduler jobs)
+|   +-- agentsutra.db            # SQLite database (auto-created, also stores scheduler jobs)
 |
 |-- scheduler/                  # Task scheduling
 |   |-- __init__.py
@@ -194,7 +194,7 @@ AgentCore/
 
 ### `main.py` - Entry Point
 - Imports `config` first to ensure `.env` is loaded before any other module
-- Configures logging to both console and `agentcore.log` via `RotatingFileHandler` (10MB max, 3 backups) to prevent unbounded log growth (v6.5)
+- Configures logging to both console and `agentsutra.log` via `RotatingFileHandler` (10MB max, 3 backups) to prevent unbounded log growth (v6.5)
 - Validates three required env vars: `ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`, `ALLOWED_USER_IDS` -- exits with clear error if any missing
 - Initializes SQLite database tables via `asyncio.run(init_db())`
 - **Storage cleanup (v6.2):** runs `prune_old_data()` (DB records) and `cleanup_workspace_files()` (output/upload files) on every startup
@@ -319,7 +319,7 @@ AgentCore/
   - `APITimeoutError`: exponential backoff starting at 1s
   - `APIError`: exponential backoff with rethrow on final attempt
   - **WARNING docstring (v2.2):** Explicitly warns that `time.sleep()` is safe only inside `asyncio.to_thread()` context
-- **Persistent usage tracking (v2.2):** Every API call is persisted to SQLite (`api_usage` table in `agentcore.db`) via synchronous `sqlite3` with `threading.Lock` for thread safety. Survives process restarts.
+- **Persistent usage tracking (v2.2):** Every API call is persisted to SQLite (`api_usage` table in `agentsutra.db`) via synchronous `sqlite3` with `threading.Lock` for thread safety. Survives process restarts.
 - `MODEL_COSTS` dict: per-model cost rates (input/output per 1M tokens) for Sonnet ($3/$15), Opus ($15/$75), Haiku ($0.80/$4)
 - `_init_usage_db()`: lazily creates `api_usage` table (thread-safe, called once)
 - `_persist_usage()`: inserts a single usage record under lock (v6.7: includes thinking_tokens)
@@ -366,7 +366,7 @@ AgentCore/
 - Each function opens and closes its own connection (acceptable for SQLite, avoids connection sharing across async contexts)
 
 ### `scheduler/cron.py` - Task Scheduling (v2: SQLite-backed persistence)
-- `AsyncIOScheduler` with `SQLAlchemyJobStore` backed by a **separate** SQLite database (`storage/scheduler.db`) to avoid lock contention with the main aiosqlite database (`storage/agentcore.db`) -- scheduled tasks survive process restarts and reboots
+- `AsyncIOScheduler` with `SQLAlchemyJobStore` backed by a **separate** SQLite database (`storage/scheduler.db`) to avoid lock contention with the main aiosqlite database (`storage/agentsutra.db`) -- scheduled tasks survive process restarts and reboots
 - `start_scheduler()`: starts scheduler, logs count of persisted jobs loaded from DB
 - `stop_scheduler()`: graceful shutdown with `wait=False`
 - `add_interval_job()`: adds recurring job at fixed interval (hours and/or minutes), supports `replace_existing=True`
@@ -498,7 +498,7 @@ _projects = data.get("projects", []) if data else []
 2. **Telegram Bot Token**
    - Open Telegram, search for `@BotFather`
    - Send `/newbot`
-   - Choose a name (e.g., "AgentCore") and username (e.g., "agentcore_bot")
+   - Choose a name (e.g., "AgentSutra") and username (e.g., "agentsutra_bot")
    - Copy the token BotFather gives you
 
 3. **Your Telegram User ID**
@@ -509,7 +509,7 @@ _projects = data.get("projects", []) if data else []
 ### Step 2: Configure Environment
 
 ```bash
-cd ~/Desktop/AgentCore
+cd ~/Desktop/AgentSutra
 cp .env.example .env
 ```
 
@@ -578,11 +578,11 @@ python main.py
 
 Expected startup output:
 ```
-AgentCore starting up
+AgentSutra starting up
 Allowed user IDs: [123456789]
 Default model: claude-sonnet-4-6
-Workspace: /Users/you/Desktop/AgentCore/workspace
-Database initialized at /Users/you/Desktop/AgentCore/storage/agentcore.db
+Workspace: /Users/you/Desktop/AgentSutra/workspace
+Database initialized at /Users/you/Desktop/AgentSutra/storage/agentsutra.db
 Projects registered: 8
 Telegram bot configured with 11 command handlers
 Scheduler started (0 persisted jobs loaded)
@@ -632,8 +632,8 @@ Open Telegram, find your bot, and send `/start`. Then try:
 ```bash
 # Remove temp files and caches
 rm -rf workspace/uploads/* workspace/outputs/*
-rm -f storage/agentcore.db
-rm -f agentcore.log
+rm -f storage/agentsutra.db
+rm -f agentsutra.log
 rm -rf __pycache__ **/__pycache__
 ```
 
@@ -644,12 +644,12 @@ Do NOT copy `.env` (contains secrets) or `venv/` (platform-specific binaries).
 ```bash
 # Option A: rsync (if SSH or shared filesystem between profiles)
 rsync -av --exclude='venv' --exclude='.env' --exclude='__pycache__' \
-  --exclude='*.pyc' --exclude='agentcore.db' --exclude='agentcore.log' \
-  ~/Desktop/AgentCore/ /Users/<runtime-user>/AgentCore/
+  --exclude='*.pyc' --exclude='agentsutra.db' --exclude='agentsutra.log' \
+  ~/Desktop/AgentSutra/ /Users/<runtime-user>/AgentSutra/
 
 # Option B: Manual copy
-# Copy the AgentCore folder to agentruntime1's home directory
-# Exclude: venv/, .env, __pycache__/, *.pyc, agentcore.db, agentcore.log
+# Copy the AgentSutra folder to agentruntime1's home directory
+# Exclude: venv/, .env, __pycache__/, *.pyc, agentsutra.db, agentsutra.log
 ```
 
 ### Update paths in projects.yaml
@@ -672,7 +672,7 @@ See `projects.yaml.example` for detailed examples. If projects are not transferr
 # 1. Switch to agentruntime1 profile and open terminal
 
 # 2. Navigate to the project
-cd ~/AgentCore
+cd ~/AgentSutra
 
 # 3. Create virtual environment
 python3 -m venv venv
@@ -700,7 +700,7 @@ Create the launch agent directory and plist:
 mkdir -p ~/Library/LaunchAgents
 ```
 
-Create `~/Library/LaunchAgents/com.agentcore.bot.plist`:
+Create `~/Library/LaunchAgents/com.agentsutra.bot.plist`:
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -708,22 +708,22 @@ Create `~/Library/LaunchAgents/com.agentcore.bot.plist`:
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.agentcore.bot</string>
+    <string>com.agentsutra.bot</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/youruser/AgentCore/venv/bin/python</string>
-        <string>/Users/youruser/AgentCore/main.py</string>
+        <string>/Users/youruser/AgentSutra/venv/bin/python</string>
+        <string>/Users/youruser/AgentSutra/main.py</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>/Users/youruser/AgentCore</string>
+    <string>/Users/youruser/AgentSutra</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/Users/youruser/AgentCore/launchd_stdout.log</string>
+    <string>/Users/youruser/AgentSutra/launchd_stdout.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/youruser/AgentCore/launchd_stderr.log</string>
+    <string>/Users/youruser/AgentSutra/launchd_stderr.log</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
@@ -736,40 +736,40 @@ Create `~/Library/LaunchAgents/com.agentcore.bot.plist`:
 Load and manage:
 ```bash
 # Load (start now + on boot)
-launchctl load ~/Library/LaunchAgents/com.agentcore.bot.plist
+launchctl load ~/Library/LaunchAgents/com.agentsutra.bot.plist
 
 # Check if running
-launchctl list | grep agentcore
+launchctl list | grep agentsutra
 
 # Stop
-launchctl unload ~/Library/LaunchAgents/com.agentcore.bot.plist
+launchctl unload ~/Library/LaunchAgents/com.agentsutra.bot.plist
 
 # View logs
-tail -f ~/AgentCore/agentcore.log
-tail -f ~/AgentCore/launchd_stderr.log
+tail -f ~/AgentSutra/agentsutra.log
+tail -f ~/AgentSutra/launchd_stderr.log
 ```
 
 **Important:** The plist uses the venv Python directly (`venv/bin/python`), so no activation script is needed. The `WorkingDirectory` ensures `config.py` finds `.env` via `Path(__file__).parent`. `KeepAlive` restarts the process if it crashes. Scheduled tasks survive reboots because APScheduler's job store is SQLite-backed.
 
 ### Monthly Maintenance (launchd cron)
 
-AgentCore auto-prunes conversation history (30 days) and API usage records (90 days) on every startup, and the `RotatingFileHandler` caps log files at 10MB. However, two resources grow silently over months of continuous operation:
+AgentSutra auto-prunes conversation history (30 days) and API usage records (90 days) on every startup, and the `RotatingFileHandler` caps log files at 10MB. However, two resources grow silently over months of continuous operation:
 
 - **SQLite fragmentation**: Deleted rows leave free pages inside the database file. `VACUUM` reclaims this space.
 - **Docker pip cache**: Auto-installed packages accumulate in `workspace/.pip-cache/`. Rarely large, but stale packages waste disk.
 - **Docker dangling images**: Failed or interrupted image builds leave orphaned layers.
 
-Create `~/AgentCore/scripts/monthly_maintenance.sh`:
+Create `~/AgentSutra/scripts/monthly_maintenance.sh`:
 ```bash
 #!/bin/bash
-# AgentCore monthly maintenance — reclaim disk space
+# AgentSutra monthly maintenance — reclaim disk space
 set -e
 
-AGENTCORE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-echo "[$(date)] AgentCore monthly maintenance starting"
+AGENTSUTRA_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+echo "[$(date)] AgentSutra monthly maintenance starting"
 
 # 1. VACUUM SQLite databases (reclaim free pages)
-for db in "$AGENTCORE_DIR/storage/agentcore.db" "$AGENTCORE_DIR/storage/scheduler.db"; do
+for db in "$AGENTSUTRA_DIR/storage/agentsutra.db" "$AGENTSUTRA_DIR/storage/scheduler.db"; do
     if [ -f "$db" ]; then
         echo "  VACUUM $db (before: $(du -h "$db" | cut -f1))"
         sqlite3 "$db" "VACUUM;"
@@ -778,7 +778,7 @@ for db in "$AGENTCORE_DIR/storage/agentcore.db" "$AGENTCORE_DIR/storage/schedule
 done
 
 # 2. Clean Docker pip cache (remove packages not accessed in 30+ days)
-PIP_CACHE="$AGENTCORE_DIR/workspace/.pip-cache"
+PIP_CACHE="$AGENTSUTRA_DIR/workspace/.pip-cache"
 if [ -d "$PIP_CACHE" ]; then
     SIZE_BEFORE=$(du -sh "$PIP_CACHE" | cut -f1)
     find "$PIP_CACHE" -type f -atime +30 -delete 2>/dev/null || true
@@ -797,10 +797,10 @@ echo "[$(date)] Monthly maintenance complete"
 ```
 
 ```bash
-chmod +x ~/AgentCore/scripts/monthly_maintenance.sh
+chmod +x ~/AgentSutra/scripts/monthly_maintenance.sh
 ```
 
-Auto-schedule via launchd — create `~/Library/LaunchAgents/com.agentcore.maintenance.plist`:
+Auto-schedule via launchd — create `~/Library/LaunchAgents/com.agentsutra.maintenance.plist`:
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -808,11 +808,11 @@ Auto-schedule via launchd — create `~/Library/LaunchAgents/com.agentcore.maint
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.agentcore.maintenance</string>
+    <string>com.agentsutra.maintenance</string>
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>/Users/youruser/AgentCore/scripts/monthly_maintenance.sh</string>
+        <string>/Users/youruser/AgentSutra/scripts/monthly_maintenance.sh</string>
     </array>
     <key>StartCalendarInterval</key>
     <dict>
@@ -824,19 +824,19 @@ Auto-schedule via launchd — create `~/Library/LaunchAgents/com.agentcore.maint
         <integer>0</integer>
     </dict>
     <key>StandardOutPath</key>
-    <string>/Users/youruser/AgentCore/maintenance.log</string>
+    <string>/Users/youruser/AgentSutra/maintenance.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/youruser/AgentCore/maintenance.log</string>
+    <string>/Users/youruser/AgentSutra/maintenance.log</string>
 </dict>
 </plist>
 ```
 
 ```bash
 # Load (runs on 1st of every month at 4:00 AM)
-launchctl load ~/Library/LaunchAgents/com.agentcore.maintenance.plist
+launchctl load ~/Library/LaunchAgents/com.agentsutra.maintenance.plist
 
 # Manual run (test it)
-~/AgentCore/scripts/monthly_maintenance.sh
+~/AgentSutra/scripts/monthly_maintenance.sh
 ```
 
 ---
@@ -867,7 +867,7 @@ All variables are set in `.env` and loaded by `config.py` at import time.
 | `DAILY_BUDGET_USD` | `0` | No | Daily API spend limit in USD; 0 = unlimited (v6.2) |
 | `MONTHLY_BUDGET_USD` | `0` | No | Monthly API spend limit in USD; 0 = unlimited (v6.2) |
 | `DOCKER_ENABLED` | `false` | No | Enable Docker container isolation for code execution (v6.4) |
-| `DOCKER_IMAGE` | `agentcore-sandbox` | No | Docker image name for sandbox containers (v6.4) |
+| `DOCKER_IMAGE` | `agentsutra-sandbox` | No | Docker image name for sandbox containers (v6.4) |
 | `DOCKER_MEMORY_LIMIT` | `2g` | No | Max memory per container, Docker format (v6.4) |
 | `DOCKER_CPU_LIMIT` | `2` | No | Max CPU cores per container (v6.4) |
 | `DOCKER_NETWORK` | `bridge` | No | Container network mode: `bridge` (full) or `none` (airgapped) (v6.4) |
@@ -881,7 +881,7 @@ All variables are set in `.env` and loaded by `config.py` at import time.
 | `UPLOADS_DIR` | `WORKSPACE_DIR/uploads` | Hardcoded |
 | `OUTPUTS_DIR` | `WORKSPACE_DIR/outputs` | Hardcoded |
 | `PROJECTS_DIR` | `WORKSPACE_DIR/projects` | Hardcoded |
-| `DB_PATH` | `BASE_DIR/storage/agentcore.db` | Hardcoded |
+| `DB_PATH` | `BASE_DIR/storage/agentsutra.db` | Hardcoded |
 | `HOST_HOME` | User's home directory | `Path.home()` |
 | `PROTECTED_ENV_KEYS` | `{ANTHROPIC_API_KEY, TELEGRAM_BOT_TOKEN}` | Hardcoded, stripped from subprocess env (exact match) |
 | `PROTECTED_ENV_SUBSTRINGS` | `{KEY, TOKEN, SECRET, PASSWORD, CREDENTIAL}` | Hardcoded, any env var whose name contains these substrings is stripped (v6.3) |
@@ -946,7 +946,7 @@ Two execution paths:
 
 **Project execution (v2):**
 1. Claude generates a bash script from the plan using SHELL_GEN_SYSTEM prompt
-2. Script is passed to `run_shell()` via heredoc with a randomized delimiter (`AGENTCORE_EOF_<uuid>`) to prevent collision with generated code
+2. Script is passed to `run_shell()` via heredoc with a randomized delimiter (`AGENTSUTRA_EOF_<uuid>`) to prevent collision with generated code
 3. Runs in the project's working directory with optional venv activation
 4. Uses the project's configured timeout (can be up to 900s for long-running scrapers)
 
@@ -1074,12 +1074,12 @@ Status is polled every 3 seconds from the thread-safe stage tracker in `brain/gr
 
 ### What It Is
 
-The project registry is what makes AgentCore more than a code-generating chatbot. By registering your existing projects in `projects.yaml`, the agent becomes a CLI co-pilot for your actual codebases — it matches natural language requests to your real tools and runs them with the right parameters.
+The project registry is what makes AgentSutra more than a code-generating chatbot. By registering your existing projects in `projects.yaml`, the agent becomes a CLI co-pilot for your actual codebases — it matches natural language requests to your real tools and runs them with the right parameters.
 
 **Without project registration:** You say "scrape jobs" and the agent writes a generic scraping script from scratch.
 **With project registration:** You say "scrape jobs" and the agent runs your actual scraper (`python3 -m scraper scrape --all --workers 5`) in its real directory with its real venv — no code generation needed.
 
-The registry file (`projects.yaml`) tells AgentCore about your existing codebases. Instead of generating new code from scratch, the agent matches trigger keywords in your message, then generates and executes the appropriate shell commands in your project's directory.
+The registry file (`projects.yaml`) tells AgentSutra about your existing codebases. Instead of generating new code from scratch, the agent matches trigger keywords in your message, then generates and executes the appropriate shell commands in your project's directory.
 
 ### File Format
 
@@ -1190,7 +1190,7 @@ Triggers are case-insensitive substring matches against your message. Tips:
 
 **Step 4: Restart and test**
 
-The registry is loaded at startup, so restart AgentCore:
+The registry is loaded at startup, so restart AgentSutra:
 ```bash
 python3 main.py
 ```
@@ -1212,9 +1212,9 @@ Then send a message matching one of your triggers. Use `/projects` to verify all
 
 ---
 
-## Extending AgentCore
+## Extending AgentSutra
 
-AgentCore is a working system, not a framework — but it's built so you can extend it without fighting the architecture. Below are the most common extension points with concrete steps.
+AgentSutra is a working system, not a framework — but it's built so you can extend it without fighting the architecture. Below are the most common extension points with concrete steps.
 
 ### Adding a New Task Type
 
@@ -1261,7 +1261,7 @@ The command blocklist and code scanner are regex-based and easy to extend.
 
 ### Integrating External Services
 
-AgentCore's `tools/` directory is the natural home for new integrations. Each tool module exposes functions that pipeline nodes can call.
+AgentSutra's `tools/` directory is the natural home for new integrations. Each tool module exposes functions that pipeline nodes can call.
 
 **Steps:**
 1. Create a new module in `tools/` (e.g., `tools/slack_notifier.py`)
@@ -1284,7 +1284,7 @@ Jobs are stored in SQLite and survive reboots. Manage with `/schedule list` (see
 
 ### Using Local AI Models (Ollama)
 
-For cost-sensitive tasks, privacy-sensitive data, or offline operation, AgentCore can use locally running Ollama models.
+For cost-sensitive tasks, privacy-sensitive data, or offline operation, AgentSutra can use locally running Ollama models.
 
 **Setup:**
 1. Install Ollama: `brew install ollama` (macOS) or see [ollama.ai](https://ollama.ai)
@@ -1376,7 +1376,7 @@ The agent can also decide to use Ollama autonomously — for example, using loca
 
 ### Data Privacy
 - All data stays on the Mac Mini -- no cloud storage
-- SQLite database is local (`storage/agentcore.db`)
+- SQLite database is local (`storage/agentsutra.db`)
 - Workspace files (uploads, outputs) are local
 - Scheduled job definitions persist in a separate SQLite database (`storage/scheduler.db`)
 - Telegram messages transit through Telegram's servers (encrypted in transit)
@@ -1394,21 +1394,21 @@ The agent can also decide to use Ollama autonomously — for example, using loca
 ## Troubleshooting
 
 ### Bot does not respond
-1. Check `agentcore.log` for errors
+1. Check `agentsutra.log` for errors
 2. Verify `TELEGRAM_BOT_TOKEN` is correct in `.env`
 3. Verify your Telegram user ID matches `ALLOWED_USER_IDS` (check with `@userinfobot`)
 4. Make sure only one instance of the bot is running -- Telegram only allows one polling connection per token
 5. If using launchd, check `launchd_stderr.log` for crash output
 
 ### "ANTHROPIC_API_KEY not set"
-- Check `.env` file exists in the AgentCore root directory (same directory as `main.py`)
+- Check `.env` file exists in the AgentSutra root directory (same directory as `main.py`)
 - Verify the key starts with `sk-ant-`
 - No quotes around the value in `.env`
 - No trailing whitespace
 
 ### "Projects registered: 0" but projects.yaml exists
 - Check YAML syntax (indentation must be consistent)
-- Verify `projects.yaml` is in the AgentCore root directory
+- Verify `projects.yaml` is in the AgentSutra root directory
 - Run `python3 -c "import yaml; print(yaml.safe_load(open('projects.yaml')))"` to check for parse errors
 
 ### Project command fails with "Working directory does not exist"
@@ -1427,7 +1427,7 @@ The agent can also decide to use Ollama autonomously — for example, using loca
 - Verify Python version: `python3 --version` (need 3.11+)
 
 ### Database errors
-- Delete `storage/agentcore.db` and restart -- it will be recreated (loses task history)
+- Delete `storage/agentsutra.db` and restart -- it will be recreated (loses task history)
 - Delete `storage/scheduler.db` and restart -- it will be recreated (loses scheduled job definitions)
 - The two databases are separate to avoid lock contention between aiosqlite and SQLAlchemy
 
@@ -1445,7 +1445,7 @@ The agent can also decide to use Ollama autonomously — for example, using loca
 ### Task stuck or no response
 - Use `/status` to see current pipeline stage
 - Use `/cancel` to abort and reset
-- Check `agentcore.log` for the task ID and any error tracebacks
+- Check `agentsutra.log` for the task ID and any error tracebacks
 - Claude API rate limits can cause delays (exponential backoff up to 8s)
 
 ### Scheduled task sends no result
@@ -1457,7 +1457,7 @@ The agent can also decide to use Ollama autonomously — for example, using loca
 
 ## External Validation
 
-AgentCore was independently stress-tested using a 4-category evaluation protocol designed to probe environment interaction, logical planning, error recovery, and adversarial safety.
+AgentSutra was independently stress-tested using a 4-category evaluation protocol designed to probe environment interaction, logical planning, error recovery, and adversarial safety.
 
 ### Test Protocol & Results
 
@@ -1494,7 +1494,7 @@ Fixes 3 critical/medium issues identified from production failures: "Bad file de
 
 **stdin=subprocess.DEVNULL on all subprocess calls (sandbox.py):**
 - Added `stdin=subprocess.DEVNULL` to every `subprocess.Popen` and `subprocess.run` call
-- Fixes "Fatal Python error: init_sys_streams / Bad file descriptor" when AgentCore runs as a background service (launchd, nohup)
+- Fixes "Fatal Python error: init_sys_streams / Bad file descriptor" when AgentSutra runs as a background service (launchd, nohup)
 - Affected: `run_code()`, `run_shell()`, `_run_code_docker()`, `_docker_pip_install()`, `_docker_available()`, all docker kill/rm calls
 - Child processes no longer inherit invalid fd 0 from daemon parent
 
@@ -1717,7 +1717,7 @@ Addresses findings from a comprehensive 3-agent stress test that independently a
 
 **Reliability fixes:**
 - **ALLOWED_USER_IDS crash protection** (`config.py`): Non-numeric entries in the comma-separated env var (e.g., `"123,abc,456"`) are now silently skipped instead of crashing the entire application at import time with `ValueError`.
-- **Log rotation** (`main.py`): Switched from `FileHandler` to `RotatingFileHandler` (10MB max, 3 backups). Previously, `agentcore.log` grew unboundedly over months of operation.
+- **Log rotation** (`main.py`): Switched from `FileHandler` to `RotatingFileHandler` (10MB max, 3 backups). Previously, `agentsutra.log` grew unboundedly over months of operation.
 - **Running tasks memory leak** (`bot/handlers.py`): `_check_resources()` now prunes completed `asyncio.Future` objects from `running_tasks` before counting active tasks. Previously, completed futures accumulated indefinitely in memory.
 
 **Modified files:**
@@ -1751,7 +1751,7 @@ Addresses the fundamental isolation gap: `run_code()` previously executed LLM-ge
 - `config.py` — added 6 Docker config vars (`DOCKER_ENABLED`, `DOCKER_IMAGE`, `DOCKER_MEMORY_LIMIT`, `DOCKER_CPU_LIMIT`, `DOCKER_NETWORK`, `DOCKER_PIP_CACHE`)
 - `tools/sandbox.py` — added `_docker_available()` (with socket fast-fail), `_build_docker_cmd()`, `_run_code_docker()`, `_docker_pip_install()` (with `threading.Lock`); modified `run_code()` routing and `run_code_with_auto_install()` pip install path
 - `.env.example` — added Docker config section
-- `AGENTCORE.md` — Docker setup guide, updated security model, config reference, changelog
+- `AGENTSUTRA.md` — Docker setup guide, updated security model, config reference, changelog
 
 **Unchanged:** `run_shell()` (host-side project commands), `ExecutionResult` dataclass, `brain/nodes/executor.py` (zero changes — Docker routing is transparent), all existing tests.
 
@@ -1890,7 +1890,7 @@ Addresses gaps identified in two independent external reviews (rated 8.2/10 and 
 - **Bot HTTP session leak fixed** (`bot/handlers.py`): `_scheduled_task_run()` now uses `async with Bot(token=...) as bot:` context manager to properly close the `httpx.AsyncClient` session after each scheduled run. Previously created an unclosed session that would exhaust the connection pool over time.
 - **Zombie stage leak fixed** (`bot/handlers.py`): Added `clear_stage(task_id)` to `handle_message()`'s `finally` block as a belt-and-suspenders guard against orphaned stage entries in the `_task_stages` dict.
 - **Command blocklist in sandbox** (`tools/sandbox.py`): `run_shell()` now checks commands against 11 destructive patterns (`rm -rf`, `mkfs`, `dd if=`, `shutdown`, `reboot`, `fork bomb`, `chmod -R 777 /`, `systemctl stop/disable`, `launchctl unload`) before execution. Blocked commands return `ExecutionResult(success=False)` with a security warning. Safe commands (single-file rm, normal chmod, pip install, etc.) pass through.
-- **Persistent API usage tracking** (`tools/claude_client.py`): Usage records now persist to SQLite (`api_usage` table in `agentcore.db`) via synchronous `sqlite3` with a `threading.Lock`. Survives process restarts. `get_usage_summary()` now reads from DB (lifetime totals, not just session). Thread-safe by design since `claude_client.py` runs inside `asyncio.to_thread()` worker threads.
+- **Persistent API usage tracking** (`tools/claude_client.py`): Usage records now persist to SQLite (`api_usage` table in `agentsutra.db`) via synchronous `sqlite3` with a `threading.Lock`. Survives process restarts. `get_usage_summary()` now reads from DB (lifetime totals, not just session). Thread-safe by design since `claude_client.py` runs inside `asyncio.to_thread()` worker threads.
 - **Database lock prevention** (`storage/db.py`): All 5 `aiosqlite.connect()` calls now include `timeout=20.0` to prevent `"database is locked"` exceptions when concurrent LangGraph pipelines write simultaneously.
 - **Synchronous sleep warning** (`tools/claude_client.py`): Added docstring warning on `call()` that `time.sleep()` is safe only because of `asyncio.to_thread()` execution context.
 - **Deployment hardening script** (`scripts/secure_deploy.sh`): New script that sets `chmod 444` on config files (`projects.yaml`, `USECASES.md`, `.env`), creates workspace directories with correct permissions, and installs a daily 3am cron job backing up `workspace/`, `storage/`, and `projects.yaml` with 7-day retention.
@@ -1908,8 +1908,8 @@ Addresses gaps identified in two independent external reviews (rated 8.2/10 and 
 
 **Bug fixes:**
 - **CRITICAL: `/schedule` crash fix** -- Refactored scheduled task callback from a local closure to a module-level `_scheduled_task_run()` function. Local closures cannot be pickled by APScheduler's SQLAlchemyJobStore, causing an immediate `AttributeError` crash on every `/schedule` command. New function accepts only serializable kwargs and creates a fresh `Bot` instance from `config.TELEGRAM_BOT_TOKEN`.
-- **MODERATE: Heredoc delimiter collision fix** -- Changed the shell heredoc delimiter from fixed `AGENTCORE_SCRIPT` to randomized `AGENTCORE_EOF_<uuid>` in executor's `_execute_project()`. Prevents the edge case where Claude-generated code contains the literal delimiter string, which would cause premature heredoc termination.
-- **MODERATE: Separate scheduler database** -- APScheduler's SQLAlchemyJobStore now uses `storage/scheduler.db` instead of sharing `storage/agentcore.db` with aiosqlite. Concurrent writes from both SQLAlchemy (sync, APScheduler updates) and aiosqlite (async, task CRUD) to the same SQLite file caused `database is locked` errors under load.
+- **MODERATE: Heredoc delimiter collision fix** -- Changed the shell heredoc delimiter from fixed `AGENTSUTRA_SCRIPT` to randomized `AGENTSUTRA_EOF_<uuid>` in executor's `_execute_project()`. Prevents the edge case where Claude-generated code contains the literal delimiter string, which would cause premature heredoc termination.
+- **MODERATE: Separate scheduler database** -- APScheduler's SQLAlchemyJobStore now uses `storage/scheduler.db` instead of sharing `storage/agentsutra.db` with aiosqlite. Concurrent writes from both SQLAlchemy (sync, APScheduler updates) and aiosqlite (async, task CRUD) to the same SQLite file caused `database is locked` errors under load.
 - **LOW: Stale Bot session fix** -- Resolved by the `/schedule` refactor above. Previously captured `context.bot` from the handler invocation; now creates a fresh `Bot` instance per scheduled execution, avoiding stale HTTP sessions on long-lived schedules.
 
 **Modified files:**
@@ -1934,4 +1934,4 @@ Addresses gaps identified in two independent external reviews (rated 8.2/10 and 
   - C4: removed nonexistent import from state.py
   - Plus 12 warning-level fixes across all modules
 - Created USECASES.md with 9 detailed portfolio use cases
-- Created AGENTCORE.md documentation
+- Created AGENTSUTRA.md documentation

@@ -296,7 +296,7 @@ IMPORTANT: Use the filled-in commands above. Do NOT leave {{file}} or {{client}}
 
     # Run via shell executor with project's working dir and timeout
     # Use randomized heredoc delimiter to avoid collision with generated code
-    delimiter = f"AGENTCORE_EOF_{uuid.uuid4().hex[:8]}"
+    delimiter = f"AGENTSUTRA_EOF_{uuid.uuid4().hex[:8]}"
     result = run_shell(
         command=f"bash -e /dev/stdin <<'{delimiter}'\n{code}\n{delimiter}",
         working_dir=project_path,
@@ -380,6 +380,13 @@ def _execute_code(state: AgentState) -> dict:
 
     system = ANALYSIS_SYSTEM if task_type in ("data", "file") else CODE_GEN_SYSTEM
 
+    # Tell the model to declare output artifacts so we don't rely solely on mtime scanning
+    system += (
+        "\n\nAt the very end of your script, print exactly one line: ARTIFACTS: followed by "
+        "a JSON array of output filenames your script created, e.g.:\n"
+        "print('ARTIFACTS:', json.dumps(['output.csv', 'chart.png']))"
+    )
+
     prompt = f"Plan:\n{plan}\n\nOriginal task: {state['message']}"
 
     if state.get("files"):
@@ -412,12 +419,17 @@ def _execute_code(state: AgentState) -> dict:
     working_dir = _determine_working_dir(state)
     result = run_code_with_auto_install(code, timeout=timeout, working_dir=working_dir)
 
+    # Prefer explicitly declared artifacts; fall back to mtime scanning
+    effective_dir = working_dir or config.OUTPUTS_DIR
+    declared = _extract_declared_artifacts(result.stdout or "", effective_dir)
+    artifacts = declared if declared else result.files_created
+
     return {
         "code": code,
         "execution_result": _format_result(result),
-        "artifacts": result.files_created,
+        "artifacts": artifacts,
         "auto_installed_packages": result.auto_installed,
-        "working_dir": str(working_dir) if working_dir else str(config.OUTPUTS_DIR),
+        "working_dir": str(effective_dir),
     }
 
 
@@ -566,6 +578,18 @@ def _strip_markdown_blocks(text: str) -> str:
     if blocks:
         return max(blocks, key=len).strip()
     return text.strip()
+
+
+def _extract_declared_artifacts(stdout: str, working_dir: Path) -> list[str]:
+    """Extract artifacts declared by the script via ARTIFACTS: line."""
+    match = re.search(r"^ARTIFACTS:\s*(\[.*\])\s*$", stdout, re.MULTILINE)
+    if not match:
+        return []
+    try:
+        names = json.loads(match.group(1))
+        return [str(working_dir / n) for n in names if (working_dir / n).exists()]
+    except (json.JSONDecodeError, TypeError):
+        return []
 
 
 def _format_result(result: ExecutionResult) -> str:

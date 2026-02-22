@@ -1,5 +1,5 @@
-# AgentCore Sandbox — Isolated execution environment for LLM-generated code
-# Build: docker build -t agentcore-sandbox .
+# AgentSutra Sandbox — Isolated execution environment for LLM-generated code
+# Build: docker build -t agentsutra-sandbox .
 # Used by tools/sandbox.py when DOCKER_ENABLED=true
 
 FROM python:3.11-slim

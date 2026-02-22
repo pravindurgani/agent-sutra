@@ -1,13 +1,13 @@
 #!/bin/bash
-# build_sandbox.sh — Build the AgentCore sandbox Docker image
+# build_sandbox.sh — Build the AgentSutra sandbox Docker image
 # Usage: ./scripts/build_sandbox.sh
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-AGENTCORE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+AGENTSUTRA_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-echo "Building AgentCore sandbox Docker image..."
-echo "Context: ${AGENTCORE_DIR}"
+echo "Building AgentSutra sandbox Docker image..."
+echo "Context: ${AGENTSUTRA_DIR}"
 echo ""
 
 # Check Docker is installed
@@ -30,18 +30,18 @@ fi
 
 # Build the image
 docker build \
-    -t agentcore-sandbox \
-    -f "${AGENTCORE_DIR}/Dockerfile" \
-    "${AGENTCORE_DIR}"
+    -t agentsutra-sandbox \
+    -f "${AGENTSUTRA_DIR}/Dockerfile" \
+    "${AGENTSUTRA_DIR}"
 
 echo ""
-echo "Done. Image 'agentcore-sandbox' is ready."
+echo "Done. Image 'agentsutra-sandbox' is ready."
 echo ""
 echo "Enable Docker sandbox in .env:"
 echo "  DOCKER_ENABLED=true"
 
 # Create pip cache directory on host
-PIP_CACHE="${AGENTCORE_DIR}/workspace/.pip-cache"
+PIP_CACHE="${AGENTSUTRA_DIR}/workspace/.pip-cache"
 mkdir -p "$PIP_CACHE"
 echo ""
 echo "Pip cache directory: ${PIP_CACHE}"

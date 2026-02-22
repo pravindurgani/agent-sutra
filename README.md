@@ -1,8 +1,8 @@
-# AgentCore
+# AgentSutra
 
 **A personal AI agent that actually runs your daily workflows.**
 
-AgentCore is a self-hosted Telegram bot backed by a [LangGraph](https://github.com/langchain-ai/langgraph) pipeline and the Claude API. You send it tasks from your phone, it classifies the request, plans the approach, executes code in a sandbox, audits the output with a *different* model, and delivers the result — all on your own hardware.
+AgentSutra is a self-hosted Telegram bot backed by a [LangGraph](https://github.com/langchain-ai/langgraph) pipeline and the Claude API. You send it tasks from your phone, it classifies the request, plans the approach, executes code in a sandbox, audits the output with a *different* model, and delivers the result — all on your own hardware.
 
 This isn't a framework or a library. It's a working system: **~6,900 lines of production Python**, **336 automated tests**, and **11 registered projects** running real daily workflows (web scraping, report generation, data analysis, competitive intelligence) on a Mac Mini M2.
 
@@ -64,7 +64,7 @@ Classify ──> Plan ──> Execute ──> Audit ──> Deliver
 ## Architecture
 
 ```
-AgentCore/
+AgentSutra/
 ├── main.py                 # Entry point, startup orchestration
 ├── config.py               # All configuration from .env
 ├── brain/
@@ -98,7 +98,7 @@ AgentCore/
 ├── .env.example            # Configuration template
 ├── Dockerfile              # Sandbox container image (Python 3.11 + common packages)
 ├── prompt.md               # Adversarial bug report used during stress testing
-├── AGENTCORE.md            # Full technical documentation (1,600 lines)
+├── AGENTSUTRA.md            # Full technical documentation (1,600 lines)
 └── USECASES.md             # Operational patterns and real-world examples
 ```
 
@@ -130,8 +130,8 @@ AgentCore/
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/pravindurgani/AgentCore.git
-cd AgentCore
+git clone https://github.com/pravindurgani/agent-sutra.git
+cd AgentSutra
 
 # 2. Create virtual environment
 python3 -m venv venv
@@ -152,7 +152,7 @@ cp .env.example .env
 # 5. (Optional) Register your projects — this is the killer feature
 cp projects.yaml.example projects.yaml
 # Edit projects.yaml with your project paths and commands
-# See AGENTCORE.md "Project Registry Guide" for the full walkthrough
+# See AGENTSUTRA.md "Project Registry Guide" for the full walkthrough
 
 # 6. Start the bot
 python3 main.py
@@ -284,7 +284,7 @@ All placeholder values are sanitized with `shlex.quote()` to prevent command inj
 ### See Also
 
 - `projects.yaml.example` — three complete examples (scraper, data pipeline, full-stack app)
-- [AGENTCORE.md](AGENTCORE.md) — full project registry documentation
+- [AGENTSUTRA.md](AGENTSUTRA.md) — full project registry documentation
 
 ---
 
@@ -320,7 +320,7 @@ Supported: CSV, Excel, JSON, PDF, images, text files, Python scripts, and more.
 
 ## Security Model
 
-AgentCore gives an LLM direct access to your machine. The security model is **defense-in-depth against LLM hallucination** — not adversarial users, because you're the only user.
+AgentSutra gives an LLM direct access to your machine. The security model is **defense-in-depth against LLM hallucination** — not adversarial users, because you're the only user.
 
 ### Layer 1: Authentication
 
@@ -374,7 +374,7 @@ Every execution output is reviewed by a different model (Opus) before delivery t
 - Missing or malformed data
 - Security concerns in generated code
 
-> **Honest limitation:** The command blocklist is bypassable with sufficient creativity. The code content scanner is not a security boundary. These layers catch *accidental* destructive commands from LLM hallucination. Docker is the hard boundary for filesystem isolation. The threat model is documented in [AGENTCORE.md](AGENTCORE.md).
+> **Honest limitation:** The command blocklist is bypassable with sufficient creativity. The code content scanner is not a security boundary. These layers catch *accidental* destructive commands from LLM hallucination. Docker is the hard boundary for filesystem isolation. The threat model is documented in [AGENTSUTRA.md](AGENTSUTRA.md).
 
 ---
 
@@ -442,7 +442,7 @@ All configuration is via `.env`. See `.env.example` for the full template with c
 
 ## Swapping Model Providers
 
-AgentCore is built on Claude, but the architecture is designed so that swapping to another provider (Gemini, GPT, open-source) requires changes in **exactly 1 file**: `tools/claude_client.py`.
+AgentSutra is built on Claude, but the architecture is designed so that swapping to another provider (Gemini, GPT, open-source) requires changes in **exactly 1 file**: `tools/claude_client.py`.
 
 ### How It Works Today
 
@@ -524,7 +524,7 @@ Without Docker, LLM-generated code runs in a subprocess with user-level filesyst
 
 ```bash
 # Build the sandbox image (includes Python 3.11, pandas, numpy, matplotlib, etc.)
-docker build -t agentcore-sandbox .
+docker build -t agentsutra-sandbox .
 
 # Enable in .env
 echo "DOCKER_ENABLED=true" >> .env
@@ -550,7 +550,7 @@ Everything else on the host is invisible to the container.
 
 ### Fallback
 
-If Docker is enabled but unavailable (daemon not running, image not built), AgentCore falls back to subprocess execution with a warning in the logs. The pipeline doesn't break.
+If Docker is enabled but unavailable (daemon not running, image not built), AgentSutra falls back to subprocess execution with a warning in the logs. The pipeline doesn't break.
 
 ---
 
@@ -568,30 +568,30 @@ python3 main.py
 # Send a test message via Telegram, verify response
 
 # 3. (macOS) Auto-start with launchd
-# Create ~/Library/LaunchAgents/com.agentcore.bot.plist
-# See AGENTCORE.md for the full plist template
+# Create ~/Library/LaunchAgents/com.agentsutra.bot.plist
+# See AGENTSUTRA.md for the full plist template
 
 # 4. (Linux) Auto-start with systemd
-# Create /etc/systemd/system/agentcore.service
-# See AGENTCORE.md for the full service template
+# Create /etc/systemd/system/agentsutra.service
+# See AGENTSUTRA.md for the full service template
 ```
 
 ### Dedicated Runtime User (Recommended for Mac)
 
-For better isolation, run AgentCore under a dedicated user account:
+For better isolation, run AgentSutra under a dedicated user account:
 
 1. Create a Standard user (e.g., `agentruntime`) on your Mac
-2. Transfer AgentCore to that user's home directory
+2. Transfer AgentSutra to that user's home directory
 3. Set up venv and .env under that user
 4. Configure launchd to auto-start on login
 
-This way the bot runs with minimal permissions and can't accidentally affect your main user's files. See [AGENTCORE.md](AGENTCORE.md) for the step-by-step transfer guide.
+This way the bot runs with minimal permissions and can't accidentally affect your main user's files. See [AGENTSUTRA.md](AGENTSUTRA.md) for the step-by-step transfer guide.
 
 ### Docker Sandbox on the Deployment Machine
 
 If using Docker:
 1. Install Docker Desktop (macOS) or Docker Engine (Linux)
-2. Build the image: `docker build -t agentcore-sandbox .`
+2. Build the image: `docker build -t agentsutra-sandbox .`
 3. Set `DOCKER_ENABLED=true` in `.env`
 4. Run the test suite to verify: `python3 -m pytest tests/test_docker_sandbox.py -v`
 
@@ -689,13 +689,13 @@ The threat model is LLM hallucination, not adversarial users. When Claude plans 
 ## Troubleshooting
 
 ### Bot does not respond
-1. Check `agentcore.log` for errors
+1. Check `agentsutra.log` for errors
 2. Verify `TELEGRAM_BOT_TOKEN` is correct in `.env`
 3. Verify your Telegram user ID matches `ALLOWED_USER_IDS` (check with [@userinfobot](https://t.me/userinfobot))
 4. **Make sure only one instance is running** — Telegram only allows one polling connection per token. If you see `409 Conflict` errors, another instance is already polling. Kill all instances and restart one.
 
 ### "ANTHROPIC_API_KEY not set"
-- Check `.env` exists in the AgentCore root directory (same folder as `main.py`)
+- Check `.env` exists in the AgentSutra root directory (same folder as `main.py`)
 - Key must start with `sk-ant-`
 - No quotes around the value
 - No trailing whitespace
@@ -721,7 +721,7 @@ The threat model is LLM hallucination, not adversarial users. When Claude plans 
 - Verify Python version: `python3 --version` (need 3.10+, recommend 3.11)
 
 ### Database errors
-- Delete `storage/agentcore.db` and restart — it will be recreated (loses task history)
+- Delete `storage/agentsutra.db` and restart — it will be recreated (loses task history)
 - Delete `storage/scheduler.db` and restart — it will be recreated (loses scheduled jobs)
 
 ### Scheduler not firing
@@ -733,7 +733,7 @@ The threat model is LLM hallucination, not adversarial users. When Claude plans 
 ### Task stuck or no response
 - `/status` shows current pipeline stage
 - `/cancel` aborts and resets
-- Check `agentcore.log` for the task ID and any tracebacks
+- Check `agentsutra.log` for the task ID and any tracebacks
 - Claude API rate limits cause delays (exponential backoff up to 8s)
 
 ---
@@ -758,7 +758,7 @@ The threat model is LLM hallucination, not adversarial users. When Claude plans 
 
 ## Verified: External Stress Tests
 
-AgentCore was independently stress-tested using a 4-category evaluation protocol designed to test environment interaction, logical planning, error recovery, and adversarial safety. All 4 categories passed.
+AgentSutra was independently stress-tested using a 4-category evaluation protocol designed to test environment interaction, logical planning, error recovery, and adversarial safety. All 4 categories passed.
 
 ### Category 1: Tool Orchestration & Internet Access (9.5/10)
 
@@ -806,18 +806,18 @@ Output: A 365-line Markdown report with comparison matrices, deployment scoring 
 
 ### Comparison to Other Projects
 
-| Project | Focus | How AgentCore Differs |
+| Project | Focus | How AgentSutra Differs |
 |---------|-------|----------------------|
-| AutoGPT / BabyAGI | Emergent autonomous behavior | AgentCore uses a structured graph with forced audit phases — reliability over autonomy |
-| CrewAI | Multi-agent collaboration | AgentCore is single-agent with adversarial auditing — simpler, more predictable |
-| LangChain | Framework/library | AgentCore is a working application, not building blocks |
-| OpenInterpreter | Code execution in terminal | AgentCore adds project registry, scheduling, budget tracking, and mobile interface |
+| AutoGPT / BabyAGI | Emergent autonomous behavior | AgentSutra uses a structured graph with forced audit phases — reliability over autonomy |
+| CrewAI | Multi-agent collaboration | AgentSutra is single-agent with adversarial auditing — simpler, more predictable |
+| LangChain | Framework/library | AgentSutra is a working application, not building blocks |
+| OpenInterpreter | Code execution in terminal | AgentSutra adds project registry, scheduling, budget tracking, and mobile interface |
 
 ---
 
 ## Documentation
 
-- **[AGENTCORE.md](AGENTCORE.md)** — Full technical documentation (1,600 lines): architecture deep-dive, every file explained, security model, deployment guide with launchd/systemd, design philosophy, benchmarks, complete changelog
+- **[AGENTSUTRA.md](AGENTSUTRA.md)** — Full technical documentation (1,600 lines): architecture deep-dive, every file explained, security model, deployment guide with launchd/systemd, design philosophy, benchmarks, complete changelog
 - **[USECASES.md](USECASES.md)** — Operational patterns, real-world interaction examples, task type reference
 - **[prompt.md](prompt.md)** — Adversarial bug report used during stress testing (shows how the system was hardened)
 

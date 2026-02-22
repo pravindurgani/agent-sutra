@@ -2,6 +2,8 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
+VERSION = "7.0.0"
+
 load_dotenv()
 
 # Paths
@@ -10,7 +12,7 @@ WORKSPACE_DIR = BASE_DIR / "workspace"
 UPLOADS_DIR = WORKSPACE_DIR / "uploads"
 OUTPUTS_DIR = WORKSPACE_DIR / "outputs"
 PROJECTS_DIR = WORKSPACE_DIR / "projects"
-DB_PATH = BASE_DIR / "storage" / "agentcore.db"
+DB_PATH = BASE_DIR / "storage" / "agentsutra.db"
 
 # Filesystem boundary — agent can operate anywhere within user's home directory
 HOST_HOME = Path.home()
@@ -40,7 +42,7 @@ def _parse_user_ids(raw: str) -> list[int]:
 
 ALLOWED_USER_IDS = _parse_user_ids(os.getenv("ALLOWED_USER_IDS", ""))
 
-# Environment keys stripped from subprocess (AgentCore's own credentials only)
+# Environment keys stripped from subprocess (AgentSutra's own credentials only)
 PROTECTED_ENV_KEYS = {"ANTHROPIC_API_KEY", "TELEGRAM_BOT_TOKEN"}
 
 # Pattern-based env filtering: strip any var whose name contains these substrings
@@ -77,7 +79,7 @@ RAM_THRESHOLD_PERCENT = int(os.getenv("RAM_THRESHOLD_PERCENT", "90"))
 
 # Docker sandbox (for isolated code execution)
 DOCKER_ENABLED = os.getenv("DOCKER_ENABLED", "false").lower() in ("true", "1", "yes")
-DOCKER_IMAGE = os.getenv("DOCKER_IMAGE", "agentcore-sandbox")
+DOCKER_IMAGE = os.getenv("DOCKER_IMAGE", "agentsutra-sandbox")
 DOCKER_MEMORY_LIMIT = os.getenv("DOCKER_MEMORY_LIMIT", "2g")
 DOCKER_CPU_LIMIT = float(os.getenv("DOCKER_CPU_LIMIT", "2"))
 DOCKER_NETWORK = os.getenv("DOCKER_NETWORK", "bridge")  # "bridge" or "none"

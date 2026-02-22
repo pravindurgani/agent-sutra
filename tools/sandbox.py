@@ -296,7 +296,7 @@ def _run_code_docker(
                 pass
 
     suffix = {"python": ".py", "javascript": ".js", "bash": ".sh"}.get(language, ".py")
-    container_name = f"agentcore-{uuid.uuid4().hex[:12]}"
+    container_name = f"agentsutra-{uuid.uuid4().hex[:12]}"
     script_path = None
 
     try:
@@ -376,7 +376,7 @@ def _docker_pip_install(package: str) -> ExecutionResult:
     when multiple concurrent tasks trigger auto-install simultaneously.
     """
     with _docker_pip_lock:
-        container_name = f"agentcore-pip-{uuid.uuid4().hex[:8]}"
+        container_name = f"agentsutra-pip-{uuid.uuid4().hex[:8]}"
         cmd = [
             "docker", "run",
             "--name", container_name,
@@ -816,7 +816,7 @@ def run_shell(
     parts.append(command)
     full_command = " && ".join(parts)
 
-    # Protected env: strip only AgentCore's own credentials
+    # Protected env: strip only AgentSutra's own credentials
     env = _filter_env()
     if env_vars:
         env.update(env_vars)

@@ -26,7 +26,7 @@ def _get_client() -> Anthropic:
 # worker threads via asyncio.to_thread. A threading.Lock guards writes so
 # concurrent pipeline threads don't collide.
 
-_usage_db_path = config.DB_PATH  # shares agentcore.db, separate table
+_usage_db_path = config.DB_PATH  # shares agentsutra.db, separate table
 _usage_lock = threading.Lock()
 _usage_db_initialized = False
 
@@ -233,6 +233,18 @@ def call(
             wait = 2 ** attempt
             logger.warning("API error: %s, retrying in %ds", e, wait)
             time.sleep(wait)
+
+        # Retry on empty/thinking-only responses (transient API behaviour)
+        except RuntimeError as e:
+            if "no text content" in str(e) or "empty response" in str(e):
+                if attempt == config.API_MAX_RETRIES - 1:
+                    logger.error("Claude returned no usable text after %d attempts", config.API_MAX_RETRIES)
+                    raise
+                wait = 2 ** (attempt + 1)
+                logger.warning("Empty/thinking-only response, retrying in %ds (attempt %d)", wait, attempt + 1)
+                time.sleep(wait)
+            else:
+                raise  # Don't swallow unrelated RuntimeErrors
 
     raise RuntimeError(f"Claude API failed after {config.API_MAX_RETRIES} attempts")
 

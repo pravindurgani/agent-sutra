@@ -90,7 +90,7 @@ def auth_required(func):
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command."""
     await update.message.reply_text(
-        "AgentCore v6 is online.\n\n"
+        f"AgentSutra v{config.VERSION} is online.\n\n"
         "Send me a task:\n"
         "- Text prompts for code generation, data analysis, or automation\n"
         "- Files (CSV, Excel, images) with instructions\n"
@@ -259,6 +259,19 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Cost
     cost_info = get_cost_summary()
     lines.append(f"Est. cost: ${cost_info['total_cost_usd']:.2f}")
+
+    # Project venv health
+    from tools.projects import get_projects
+    venv_issues = []
+    for proj in get_projects():
+        venv = proj.get("venv")
+        if venv:
+            python_bin = Path(venv) / "bin" / "python3"
+            if not python_bin.exists():
+                venv_issues.append(f"  '{proj['name']}': venv python not found at {python_bin}")
+    if venv_issues:
+        lines.append("Project venv issues:")
+        lines.extend(venv_issues)
 
     await update.message.reply_text("\n".join(lines))
 

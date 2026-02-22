@@ -1,8 +1,8 @@
-# AgentCore v6.11 — Complete Capabilities & Usage Guide
+# AgentSutra v6.11 — Complete Capabilities & Usage Guide
 
 **Status: GOD MODE ACHIEVED**
 
-AgentCore is a fully autonomous AI agent system controlled via Telegram, running on Mac Mini M2. It combines Claude Sonnet 4.6 (generation) + Claude Opus 4.6 (adversarial auditing) with unrestricted shell access, full internet, local AI orchestration, big data processing, and production frontend generation — all from your phone. Hardened with budget enforcement, RAM guards, rate limiting, 34-pattern command blocklist, code content scanner, pattern-based credential filtering, parameter injection prevention, optional Docker container isolation for code execution, process group kill on timeout, fail-safe audit defaults, pipeline-level timeouts, error sanitization, environment error detection, project dependency bootstrapping, and 336 automated tests.
+AgentSutra is a fully autonomous AI agent system controlled via Telegram, running on Mac Mini M2. It combines Claude Sonnet 4.6 (generation) + Claude Opus 4.6 (adversarial auditing) with unrestricted shell access, full internet, local AI orchestration, big data processing, and production frontend generation — all from your phone. Hardened with budget enforcement, RAM guards, rate limiting, 34-pattern command blocklist, code content scanner, pattern-based credential filtering, parameter injection prevention, optional Docker container isolation for code execution, process group kill on timeout, fail-safe audit defaults, pipeline-level timeouts, error sanitization, environment error detection, project dependency bootstrapping, and 336 automated tests.
 
 ---
 
@@ -59,7 +59,7 @@ God Mode = the agent has the same power level as you sitting at the terminal, bu
 
 ## 7 Task Types
 
-AgentCore auto-classifies every message into one of these types. Each gets a specialized planner prompt, executor, and auditor criteria.
+AgentSutra auto-classifies every message into one of these types. Each gets a specialized planner prompt, executor, and auditor criteria.
 
 ### 1. Code (`code`)
 Write any software from scratch. Python, JavaScript, Bash. The agent writes it, runs it, verifies the output with assertions, and sends you the result + source file.
@@ -267,7 +267,7 @@ Registered projects are triggered by keywords in your message. You don't need sl
 
 ### 4. Chain Tasks with Conversation Memory
 
-AgentCore remembers your recent conversation. You can build on previous tasks:
+AgentSutra remembers your recent conversation. You can build on previous tasks:
 
 ```
 You: Analyze revenue.csv and show top 10 products
@@ -316,7 +316,7 @@ For tasks requiring hundreds of LLM calls (classifying rows, generating descript
 
 ### 8. Big Data: Let the Agent Handle It Locally
 
-For large files (500+ rows), AgentCore automatically:
+For large files (500+ rows), AgentSutra automatically:
 - Sends only metadata (columns, types, row count, sample) to Claude for planning
 - Generates a local Python/duckdb script to process the actual data
 - Never uploads your raw data to Claude's API
@@ -504,7 +504,7 @@ Write a technical blog post about [topic] with code examples
 
 ## Operational Maintenance
 
-AgentCore handles most cleanup automatically — conversation history pruning (30 days), API usage pruning (90 days), workspace file cleanup (7 days), and log rotation (10MB cap). Two resources require monthly attention:
+AgentSutra handles most cleanup automatically — conversation history pruning (30 days), API usage pruning (90 days), workspace file cleanup (7 days), and log rotation (10MB cap). Two resources require monthly attention:
 
 | Resource | Growth Pattern | Mitigation |
 |----------|---------------|------------|
@@ -512,7 +512,7 @@ AgentCore handles most cleanup automatically — conversation history pruning (3
 | Docker pip-cache | Auto-installed packages accumulate | Remove packages unused for 30+ days |
 | Docker layers | Failed builds leave dangling images | `docker system prune` |
 
-A `scripts/monthly_maintenance.sh` script handles all three. Scheduled via launchd to run on the 1st of every month at 4:00 AM. See AGENTCORE.md [Transfer to agentruntime1](#transfer-to-agentruntime1) for the full script and plist.
+A `scripts/monthly_maintenance.sh` script handles all three. Scheduled via launchd to run on the 1st of every month at 4:00 AM. See AGENTSUTRA.md [Transfer to agentruntime1](#transfer-to-agentruntime1) for the full script and plist.
 
 ### Network Isolation for Sensitive Tasks
 
@@ -631,7 +631,7 @@ The job survives bot restarts via APScheduler SQLite persistence.
       |
  [Telegram Bot API]
       |
- [AgentCore v6.11 on Mac Mini M2]
+ [AgentSutra v6.11 on Mac Mini M2]
       |
  classify ──> plan ──> execute ──> audit ──> deliver
  (Sonnet)    (Sonnet)  (Sonnet)   (Opus)    (Sonnet)

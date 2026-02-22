@@ -16,13 +16,13 @@ logging.basicConfig(
     handlers=[
         logging.StreamHandler(),
         logging.handlers.RotatingFileHandler(
-            config.BASE_DIR / "agentcore.log",
+            config.BASE_DIR / "agentsutra.log",
             maxBytes=10_000_000,
             backupCount=3,
         ),
     ],
 )
-logger = logging.getLogger("agentcore")
+logger = logging.getLogger("agentsutra")
 
 from storage.db import init_db, recover_stale_tasks, prune_old_data, cleanup_workspace_files  # noqa: E402
 from bot.telegram_bot import create_bot  # noqa: E402
@@ -44,7 +44,7 @@ def main():
         sys.exit(1)
 
     logger.info("=" * 50)
-    logger.info("AgentCore starting up")
+    logger.info("AgentSutra v%s starting up", config.VERSION)
     logger.info("=" * 50)
     logger.info("Allowed user IDs: %s", config.ALLOWED_USER_IDS)
     logger.info("Default model: %s", config.DEFAULT_MODEL)
@@ -81,7 +81,7 @@ def main():
 
     async def on_shutdown(app):
         stop_scheduler()
-        logger.info("AgentCore stopped")
+        logger.info("AgentSutra stopped")
 
     bot.post_init = on_startup
     bot.post_shutdown = on_shutdown

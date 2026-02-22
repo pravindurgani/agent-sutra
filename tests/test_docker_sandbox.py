@@ -1,8 +1,8 @@
 """Tests for Docker sandbox isolation in tools/sandbox.py.
 
 Tier 1: Unit tests (always run, Docker not required)
-Tier 2: Integration tests (require Docker + agentcore-sandbox image)
-Tier 3: Security tests (require Docker + agentcore-sandbox image)
+Tier 2: Integration tests (require Docker + agentsutra-sandbox image)
+Tier 3: Security tests (require Docker + agentsutra-sandbox image)
 """
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ def _sandbox_image_exists() -> bool:
         return False
     try:
         result = subprocess.run(
-            ["docker", "image", "inspect", "agentcore-sandbox"],
+            ["docker", "image", "inspect", "agentsutra-sandbox"],
             capture_output=True, timeout=5,
         )
         return result.returncode == 0
@@ -53,7 +53,7 @@ requires_docker = pytest.mark.skipif(
     not _docker_installed(), reason="Docker not installed",
 )
 requires_sandbox_image = pytest.mark.skipif(
-    not _sandbox_image_exists(), reason="agentcore-sandbox image not built",
+    not _sandbox_image_exists(), reason="agentsutra-sandbox image not built",
 )
 
 

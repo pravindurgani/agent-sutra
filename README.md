@@ -2,6 +2,7 @@
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![Tests](https://img.shields.io/badge/tests-330%20passed-brightgreen.svg)]()
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Claude API](https://img.shields.io/badge/LLM-Claude%20Sonnet%20%2B%20Opus-blueviolet.svg)]()
 
 **A private, autonomous AI agent for your Mac that actually gets work done.**

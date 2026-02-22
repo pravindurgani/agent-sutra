@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import subprocess
 import tempfile
 import threading
@@ -286,15 +287,7 @@ def _run_code_docker(
         return ExecutionResult(success=False, stderr=safety_msg)
 
     working_dir.mkdir(parents=True, exist_ok=True)
-
-    # Track path→mtime to detect both new AND modified files (e.g. overwritten on retry)
-    existing_mtimes = {}
-    if working_dir.exists():
-        for f in _walk_artifacts(working_dir):
-            try:
-                existing_mtimes[f] = f.stat().st_mtime
-            except OSError:
-                pass
+    existing_mtimes = _snapshot_mtimes(working_dir)
 
     suffix = {"python": ".py", "javascript": ".js", "bash": ".sh"}.get(language, ".py")
     container_name = f"agentsutra-{uuid.uuid4().hex[:12]}"
@@ -320,26 +313,10 @@ def _run_code_docker(
             cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout,
         )
 
-        new_files = []
-        for f in _walk_artifacts(working_dir):
-            if f != script_path:
-                prev_mtime = existing_mtimes.get(f)
-                if prev_mtime is None or f.stat().st_mtime > prev_mtime:
-                    new_files.append(str(f))
-
-        # Fallback: if mtime found nothing but execution succeeded, parse stdout for file paths
-        if not new_files and result.returncode == 0 and result.stdout:
-            new_files = _extract_paths_from_stdout(result.stdout, working_dir)
-            if new_files:
-                logger.info("Artifacts detected via stdout fallback: %s", [Path(f).name for f in new_files])
-
-        # Sanity check: too many artifacts likely indicates venv/package leak
-        new_files = _apply_artifact_sanity_check(new_files, working_dir)
-
-        if new_files:
-            logger.info("Artifacts detected: %s", [Path(f).name for f in new_files])
-        else:
-            logger.warning("No artifacts detected in %s (%d files scanned)", working_dir, len(existing_mtimes))
+        new_files = _detect_artifacts(
+            existing_mtimes, working_dir, result.stdout or "", result.returncode,
+            exclude_path=script_path,
+        )
         tb = _extract_traceback(result.stderr) if result.returncode != 0 else ""
 
         return ExecutionResult(
@@ -548,6 +525,67 @@ def _apply_artifact_sanity_check(new_files: list[str], working_dir: Path) -> lis
     return new_files  # Return originals if filtering removes everything
 
 
+def _snapshot_mtimes(working_dir: Path) -> dict[Path, float]:
+    """Snapshot path→mtime for all artifact files in working_dir.
+
+    Called before execution to establish a baseline. After execution,
+    _detect_artifacts() compares against this snapshot to find new/modified files.
+    """
+    mtimes: dict[Path, float] = {}
+    if working_dir.exists():
+        for f in _walk_artifacts(working_dir):
+            try:
+                mtimes[f] = f.stat().st_mtime
+            except OSError:
+                pass
+    return mtimes
+
+
+def _detect_artifacts(
+    existing_mtimes: dict[Path, float],
+    working_dir: Path,
+    stdout: str,
+    returncode: int,
+    exclude_path: Path | None = None,
+) -> list[str]:
+    """Detect new/modified artifact files after code execution.
+
+    Compares current state against a pre-execution mtime snapshot.
+    Falls back to parsing stdout for file paths if mtime finds nothing.
+    Applies a sanity check to filter excessive results (venv/package leaks).
+
+    Args:
+        existing_mtimes: Snapshot from _snapshot_mtimes() before execution.
+        working_dir: Directory to scan for artifacts.
+        stdout: Execution stdout (used for fallback path extraction).
+        returncode: Process return code (fallback only runs on success).
+        exclude_path: Optional path to exclude (e.g. the temp script file).
+    """
+    new_files = []
+    for f in _walk_artifacts(working_dir):
+        if f == exclude_path:
+            continue
+        prev_mtime = existing_mtimes.get(f)
+        if prev_mtime is None or f.stat().st_mtime > prev_mtime:
+            new_files.append(str(f))
+
+    # Fallback: if mtime found nothing but execution succeeded, parse stdout for file paths
+    if not new_files and returncode == 0 and stdout:
+        new_files = _extract_paths_from_stdout(stdout, working_dir)
+        if new_files:
+            logger.info("Artifacts detected via stdout fallback: %s", [Path(f).name for f in new_files])
+
+    # Sanity check: too many artifacts likely indicates venv/package leak
+    new_files = _apply_artifact_sanity_check(new_files, working_dir)
+
+    if new_files:
+        logger.info("Artifacts detected: %s", [Path(f).name for f in new_files])
+    else:
+        logger.warning("No artifacts detected in %s (%d files scanned)", working_dir, len(existing_mtimes))
+
+    return new_files
+
+
 def _extract_paths_from_stdout(stdout: str, working_dir: Path) -> list[str]:
     """Extract file paths mentioned in stdout that exist on disk.
 
@@ -632,15 +670,7 @@ def run_code(
         return ExecutionResult(success=False, stderr=safety_msg)
 
     working_dir.mkdir(parents=True, exist_ok=True)
-
-    # Track path→mtime to detect both new AND modified files (e.g. overwritten on retry)
-    existing_mtimes = {}
-    if working_dir.exists():
-        for f in _walk_artifacts(working_dir):
-            try:
-                existing_mtimes[f] = f.stat().st_mtime
-            except OSError:
-                pass
+    existing_mtimes = _snapshot_mtimes(working_dir)
 
     suffix = {"python": ".py", "javascript": ".js", "bash": ".sh"}.get(language, ".py")
 
@@ -681,26 +711,10 @@ def run_code(
             logger.warning("Execution timed out after %ds, killed process group %d", timeout, proc.pid)
             return ExecutionResult(success=False, stderr=f"Execution timed out after {timeout}s", timed_out=True)
 
-        new_files = []
-        for f in _walk_artifacts(working_dir):
-            if f != script_path:
-                prev_mtime = existing_mtimes.get(f)
-                if prev_mtime is None or f.stat().st_mtime > prev_mtime:
-                    new_files.append(str(f))
-
-        # Fallback: if mtime found nothing but execution succeeded, parse stdout for file paths
-        if not new_files and proc.returncode == 0 and stdout:
-            new_files = _extract_paths_from_stdout(stdout, working_dir)
-            if new_files:
-                logger.info("Artifacts detected via stdout fallback: %s", [Path(f).name for f in new_files])
-
-        # Sanity check: too many artifacts likely indicates venv/package leak
-        new_files = _apply_artifact_sanity_check(new_files, working_dir)
-
-        if new_files:
-            logger.info("Artifacts detected: %s", [Path(f).name for f in new_files])
-        else:
-            logger.warning("No artifacts detected in %s (%d files scanned)", working_dir, len(existing_mtimes))
+        new_files = _detect_artifacts(
+            existing_mtimes, working_dir, stdout, proc.returncode,
+            exclude_path=script_path,
+        )
         tb = _extract_traceback(stderr) if proc.returncode != 0 else ""
 
         return ExecutionResult(
@@ -757,7 +771,7 @@ def run_code_with_auto_install(
         else:
             pip_bin = f"{venv_path}/bin/pip" if venv_path else "pip3"
             install_result = run_shell(
-                f"{pip_bin} install {missing}",
+                f"{pip_bin} install {shlex.quote(missing)}",
                 working_dir=str(working_dir or config.OUTPUTS_DIR),
                 timeout=120,
             )
@@ -822,13 +836,7 @@ def run_shell(
     if env_vars:
         env.update(env_vars)
 
-    # Track path→mtime to detect both new AND modified files (e.g. overwritten on retry)
-    existing_mtimes = {}
-    for f in _walk_artifacts(working_dir):
-        try:
-            existing_mtimes[f] = f.stat().st_mtime
-        except OSError:
-            pass
+    existing_mtimes = _snapshot_mtimes(working_dir)
 
     logger.info("Shell exec: %s (cwd=%s, timeout=%ds)", command[:200], working_dir, timeout)
 
@@ -848,25 +856,9 @@ def run_shell(
             logger.warning("Shell command timed out after %ds, killed process group %d", timeout, proc.pid)
             return ExecutionResult(success=False, stderr=f"Timed out after {timeout}s", timed_out=True)
 
-        new_files = []
-        for f in _walk_artifacts(working_dir):
-            prev_mtime = existing_mtimes.get(f)
-            if prev_mtime is None or f.stat().st_mtime > prev_mtime:
-                new_files.append(str(f))
-
-        # Fallback: if mtime found nothing but execution succeeded, parse stdout for file paths
-        if not new_files and proc.returncode == 0 and stdout:
-            new_files = _extract_paths_from_stdout(stdout, working_dir)
-            if new_files:
-                logger.info("Artifacts detected via stdout fallback: %s", [Path(f).name for f in new_files])
-
-        # Sanity check: too many artifacts likely indicates venv/package leak
-        new_files = _apply_artifact_sanity_check(new_files, working_dir)
-
-        if new_files:
-            logger.info("Artifacts detected: %s", [Path(f).name for f in new_files])
-        else:
-            logger.warning("No artifacts detected in %s (%d files scanned)", working_dir, len(existing_mtimes))
+        new_files = _detect_artifacts(
+            existing_mtimes, working_dir, stdout, proc.returncode,
+        )
         tb = _extract_traceback(stderr) if proc.returncode != 0 else ""
 
         return ExecutionResult(

@@ -69,6 +69,7 @@ CRITICAL RULES:
 3. Do NOT install packages or write new Python code.
 4. This runs on macOS. Do NOT use GNU-specific commands like `timeout`, `readlink -f`,
    `sed -i` (without '' argument), `shuf`, or `date -d`. Use POSIX-compatible alternatives.
+5. Always use --no-llm and --no-pdf flags unless the user explicitly requests LLM insights or PDF output.
 
 Write ONLY the bash script. Start with #!/bin/bash and set -e."""
 
@@ -113,9 +114,17 @@ def execute(state: AgentState) -> dict:
     if task_type == "project":
         return _execute_project(state)
     elif task_type == "ui_design":
-        return _execute_ui_design(state)
+        return _execute_html_generation(
+            state, system=UI_DESIGN_SYSTEM_EXEC, max_tokens=8192,
+            log_label="UI design", filename_base="design",
+            preview_extensions=(".csv", ".txt", ".json", ".html"),
+        )
     elif task_type == "frontend":
-        return _execute_frontend(state)
+        return _execute_html_generation(
+            state, system=FRONTEND_SYSTEM_EXEC, max_tokens=16000,
+            log_label="Frontend app", filename_base="app",
+            preview_extensions=(".csv", ".txt", ".json", ".html", ".js", ".css"),
+        )
     else:
         return _execute_code(state)
 
@@ -454,8 +463,16 @@ def _execute_code(state: AgentState) -> dict:
     }
 
 
-def _execute_ui_design(state: AgentState) -> dict:
-    """Generate a self-contained HTML file for UI design tasks."""
+def _execute_html_generation(
+    state: AgentState,
+    *,
+    system: str,
+    max_tokens: int,
+    log_label: str,
+    filename_base: str,
+    preview_extensions: tuple[str, ...],
+) -> dict:
+    """Generate a self-contained HTML file (shared by ui_design and frontend tasks)."""
     plan = state.get("plan", "")
 
     prompt = f"Plan:\n{plan}\n\nOriginal task: {state['message']}"
@@ -465,7 +482,7 @@ def _execute_ui_design(state: AgentState) -> dict:
         for fpath in state["files"]:
             p = Path(fpath)
             prompt += f"\n- {fpath}"
-            if p.exists() and p.suffix in (".csv", ".txt", ".json", ".html"):
+            if p.exists() and p.suffix in preview_extensions:
                 content = get_file_content(p, max_chars=3000)
                 prompt += f"\n  Content preview:\n{content[:1000]}"
 
@@ -474,77 +491,29 @@ def _execute_ui_design(state: AgentState) -> dict:
         if state.get("code"):
             prompt += f"\n\n--- Previous HTML ---\n{state['code'][:5000]}"
 
-    code = claude_client.call(prompt, system=UI_DESIGN_SYSTEM_EXEC, max_tokens=8192, thinking=True)
+    code = claude_client.call(prompt, system=system, max_tokens=max_tokens, thinking=True)
     code = _strip_markdown_blocks(code)
 
     if not code.strip():
         return {
             "code": "",
-            "execution_result": "Execution: FAILED\nErrors:\nUI design generation returned empty",
+            "execution_result": f"Execution: FAILED\nErrors:\n{log_label} generation returned empty",
             "artifacts": [],
         }
 
     # Save the HTML file with UUID suffix to prevent TOCTOU race
-    message = state.get("message", "design")
+    message = state.get("message", filename_base)
     words = "".join(c if c.isalnum() or c == " " else "" for c in message)
-    base_name = "_".join(words.split()[:4]).lower() or "design"
+    base_name = "_".join(words.split()[:4]).lower() or filename_base
     filename = f"{base_name}_{uuid.uuid4().hex[:6]}.html"
     output_path = config.OUTPUTS_DIR / filename
 
     output_path.write_text(code, encoding="utf-8")
-    logger.info("UI design saved: %s (%d bytes)", output_path, len(code))
+    logger.info("%s saved: %s (%d bytes)", log_label, output_path, len(code))
 
     return {
         "code": code,
-        "execution_result": f"Execution: SUCCESS (exit code 0)\nOutput:\nHTML design generated: {filename} ({len(code):,} chars)\nFiles created: {filename}",
-        "artifacts": [str(output_path)],
-        "working_dir": str(config.OUTPUTS_DIR),
-    }
-
-
-def _execute_frontend(state: AgentState) -> dict:
-    """Generate a production-quality frontend application as a self-contained HTML file."""
-    plan = state.get("plan", "")
-
-    prompt = f"Plan:\n{plan}\n\nOriginal task: {state['message']}"
-
-    if state.get("files"):
-        prompt += "\n\nReference files provided:"
-        for fpath in state["files"]:
-            p = Path(fpath)
-            prompt += f"\n- {fpath}"
-            if p.exists() and p.suffix in (".csv", ".txt", ".json", ".html", ".js", ".css"):
-                content = get_file_content(p, max_chars=3000)
-                prompt += f"\n  Content preview:\n{content[:1000]}"
-
-    if state.get("audit_feedback"):
-        prompt += f"\n\n--- PREVIOUS ATTEMPT FAILED ---\n{state['audit_feedback']}"
-        if state.get("code"):
-            prompt += f"\n\n--- Previous HTML ---\n{state['code'][:5000]}"
-
-    code = claude_client.call(prompt, system=FRONTEND_SYSTEM_EXEC, max_tokens=16000, thinking=True)
-    code = _strip_markdown_blocks(code)
-
-    if not code.strip():
-        return {
-            "code": "",
-            "execution_result": "Execution: FAILED\nErrors:\nFrontend generation returned empty",
-            "artifacts": [],
-        }
-
-    # Save the HTML file with UUID suffix to prevent TOCTOU race
-    message = state.get("message", "app")
-    words = "".join(c if c.isalnum() or c == " " else "" for c in message)
-    base_name = "_".join(words.split()[:4]).lower() or "app"
-    filename = f"{base_name}_{uuid.uuid4().hex[:6]}.html"
-    output_path = config.OUTPUTS_DIR / filename
-
-    output_path.write_text(code, encoding="utf-8")
-    logger.info("Frontend app saved: %s (%d bytes)", output_path, len(code))
-
-    return {
-        "code": code,
-        "execution_result": f"Execution: SUCCESS (exit code 0)\nOutput:\nFrontend app generated: {filename} ({len(code):,} chars)\nFiles created: {filename}",
+        "execution_result": f"Execution: SUCCESS (exit code 0)\nOutput:\n{log_label} generated: {filename} ({len(code):,} chars)\nFiles created: {filename}",
         "artifacts": [str(output_path)],
         "working_dir": str(config.OUTPUTS_DIR),
     }

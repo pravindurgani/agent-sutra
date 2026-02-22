@@ -24,7 +24,7 @@ htmlcov/
 
 # Runtime artifacts
 *.log
-agentcore.log
+agentsutra.log
 launchd_stdout.log
 launchd_stderr.log
 maintenance.log

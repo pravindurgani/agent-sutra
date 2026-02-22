@@ -53,10 +53,12 @@ Every architectural decision in this codebase was made through the lens of: **"W
 9. [How the Pipeline Works](#how-the-pipeline-works)
 10. [Telegram Bot Commands](#telegram-bot-commands)
 11. [Project Registry Guide](#project-registry-guide)
-12. [Benchmarks](#benchmarks)
-13. [Security Model](#security-model)
-14. [Troubleshooting](#troubleshooting)
-15. [Changelog](#changelog)
+12. [Extending AgentSutra](#extending-agentsutra)
+13. [Swapping Model Providers](#swapping-model-providers)
+14. [Benchmarks](#benchmarks)
+15. [Security Model](#security-model)
+16. [Troubleshooting](#troubleshooting)
+17. [Changelog](#changelog)
 
 ---
 
@@ -1298,6 +1300,80 @@ For cost-sensitive tasks, privacy-sensitive data, or offline operation, AgentSut
 **When to use:** Batch classification of hundreds of rows (avoids API costs), processing confidential data that shouldn't leave your machine, or when your internet is down.
 
 The agent can also decide to use Ollama autonomously — for example, using local AI for bulk classification while using Claude for the planning and auditing stages.
+
+---
+
+## Swapping Model Providers
+
+AgentSutra is built on Claude, but the architecture is designed so that swapping to another provider (Gemini, GPT, open-source) requires changes in **exactly 1 file**: `tools/claude_client.py`.
+
+### How It Works Today
+
+The entire codebase interacts with LLMs through one function:
+
+```python
+# tools/claude_client.py
+def call(prompt, system_prompt="", model=None, ...) -> str:
+```
+
+Every node in the pipeline (classifier, planner, executor, auditor, deliverer) calls `claude_client.call()`. None of them import `anthropic` directly or know which provider is being used.
+
+### To Swap to Another Provider
+
+**Step 1:** Replace the API call in `tools/claude_client.py`
+
+The `call()` function (around line 180) currently does:
+
+```python
+response = self.client.messages.create(
+    model=model,
+    max_tokens=max_tokens,
+    system=system_prompt,
+    messages=[{"role": "user", "content": prompt}],
+    ...
+)
+```
+
+Replace this with your provider's equivalent. For example, with OpenAI:
+
+```python
+response = openai.chat.completions.create(
+    model=model,
+    messages=[
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": prompt},
+    ],
+)
+```
+
+**Step 2:** Update the cost tracking
+
+The `MODEL_COSTS` dict and `_persist_usage()` function handle per-token cost calculation. Update the pricing to match your provider.
+
+**Step 3:** Update `.env`
+
+Change `ANTHROPIC_API_KEY` to your provider's key name, and update `DEFAULT_MODEL` / `COMPLEX_MODEL` to your models.
+
+### What About Extended Thinking?
+
+Extended thinking (Anthropic-specific) is handled in `call()` with a feature flag (`ENABLE_THINKING`). If your provider doesn't support it, set `ENABLE_THINKING=false` in `.env` and the code skips it entirely.
+
+### Why Not an Abstraction Layer?
+
+We deliberately chose not to build a provider abstraction (like LiteLLM or a custom interface). The reasoning:
+
+1. **One file to change vs. an abstraction to maintain.** Swapping providers is a one-time migration, not a runtime toggle. An abstraction adds permanent complexity for a hypothetical event.
+2. **Provider-specific features matter.** Extended thinking, prompt caching, and tool use work differently across providers. An abstraction layer either exposes the lowest common denominator or becomes a leaky abstraction.
+3. **The 5-node pipeline doesn't care.** Nodes call `client.call(prompt, system_prompt)` and get a string back. That interface is already provider-agnostic.
+
+### Multi-Provider Setup (Auditor on a Different Provider)
+
+The adversarial auditing pattern works best when the auditor uses a different model family. You could:
+1. Create a second client instance in `claude_client.py` for the auditor
+2. Have `auditor.py` use the second client
+3. This gives you, e.g., Claude for execution + Gemini for auditing
+
+This requires ~30 lines of code changes across 2 files.
 
 ---
 

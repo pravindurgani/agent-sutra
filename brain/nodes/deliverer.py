@@ -13,13 +13,18 @@ SUMMARY_SYSTEM = """You are formatting a task result for delivery via Telegram c
 You receive the original request, the execution output, and context.
 Write a polished, structured response.
 
+CRITICAL RULE: If the status says FAILED, you MUST clearly state the task failed and explain why.
+NEVER claim files were created, saved, or generated unless they are listed under "Files generated".
+NEVER fabricate success from a failed execution. Be honest about what happened and what went wrong.
+
 Formatting rules:
-- Start with a clear 1-sentence summary of what was accomplished
+- Start with a clear 1-sentence summary of what was accomplished (or what failed)
 - Use sections with headers where helpful (just CAPS or bold-style text)
 - Use bullet points (•) for lists
 - For code tasks: describe what the code does and key results. Do NOT paste the full source code — it will be attached as a file
 - For data/analysis tasks: highlight key findings, numbers, patterns, and insights
 - For project tasks: summarize what ran and the meaningful output
+- For FAILED tasks: state what went wrong, what was attempted, and suggest how to fix it
 - If assertions passed, mention briefly (e.g. "All 5 validation checks passed")
 - If there were retries, briefly note what was corrected
 - Mention attached files at the end if any
@@ -51,11 +56,26 @@ def deliver(state: AgentState) -> dict:
     if task_type == "project" and state.get("extracted_params"):
         param_info = f"\nParameters used: {state['extracted_params']}"
 
+    # Build status line and failure context
+    if verdict == "pass":
+        status_line = "Status: Completed successfully"
+        failure_context = ""
+        if retry_count > 0:
+            status_line += f" (after {retry_count} retries)"
+            failure_context = f"\nRetry note: {state.get('audit_feedback', '')[:300]}"
+    else:
+        status_line = f"Status: FAILED after {retry_count} retries"
+        audit_feedback = state.get("audit_feedback", "")
+        failure_context = f"""
+IMPORTANT: This task FAILED. The audit verdict is FAIL.
+Do NOT claim the task succeeded or that files were created unless they appear in "Files generated" below.
+Failure reason: {audit_feedback[:500]}"""
+
     prompt = f"""Original request: {state['message']}
 
 Task type: {task_type}
-Status: {"Completed successfully" if verdict == "pass" else f"Completed with issues (after {retry_count} retries)"}
-{f"Retry note: {state.get('audit_feedback', '')[:300]}" if retry_count > 0 and verdict == "pass" else ""}
+{status_line}
+{failure_context}
 {param_info}
 
 Execution output (stdout):
@@ -175,11 +195,10 @@ def _fallback_response(state: AgentState, artifacts: list[str]) -> str:
         else:
             parts.append("Task completed successfully.")
     else:
-        parts.append(f"Task completed with issues after {retry_count} retries.")
-        # Include audit feedback so the user knows what went wrong
+        parts.append(f"Task FAILED after {retry_count} retries. No output was produced.")
         audit_feedback = state.get("audit_feedback", "")
         if audit_feedback:
-            parts.append(f"Last issue: {audit_feedback[:500]}")
+            parts.append(f"Failure reason: {audit_feedback[:500]}")
 
     # Add execution output summary
     execution_result = state.get("execution_result", "")

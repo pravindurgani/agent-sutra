@@ -304,6 +304,14 @@ IMPORTANT: Use the filled-in commands above. Do NOT leave {{file}} or {{client}}
         venv_path=venv,
     )
 
+    # Log failure details so they appear in agentsutra.log (not just swallowed by auditor)
+    if not result.success:
+        logger.error(
+            "Project execution failed (rc=%d): %s",
+            result.return_code,
+            (result.traceback or result.stderr or "(no stderr)")[:500],
+        )
+
     # Auto-install on ImportError (mirrors run_code_with_auto_install behaviour)
     if not result.success:
         missing = _parse_import_error_from_result(result)

@@ -1,6 +1,6 @@
 # AgentCore v6.11 - Complete Project Documentation
 
-A Telegram-driven AI agent server running on Mac Mini M2 (16GB). Receives tasks via Telegram, processes them through a LangGraph Plan-Execute-Audit pipeline powered by Claude API, and delivers results back. Features: project registry, cross-model adversarial auditing (Sonnet+Opus), full internet access, local AI orchestration (Ollama), big data processing, production frontend generation, Docker container isolation for code execution, 7 task types, 11 commands, budget enforcement, RAM guards, code content scanner, 34-pattern command blocklist, environment error detection, project dependency bootstrapping, and 326 automated tests.
+A Telegram-driven AI agent server running on Mac Mini M2 (16GB). Receives tasks via Telegram, processes them through a LangGraph Plan-Execute-Audit pipeline powered by Claude API, and delivers results back. Features: project registry, cross-model adversarial auditing (Sonnet+Opus), full internet access, local AI orchestration (Ollama), big data processing, production frontend generation, Docker container isolation for code execution, 7 task types, 11 commands, budget enforcement, RAM guards, code content scanner, 34-pattern command blocklist, environment error detection, project dependency bootstrapping, and 336 automated tests.
 
 **Last updated:** 2026-02-21
 
@@ -162,18 +162,18 @@ AgentCore/
 |   |-- __init__.py
 |   +-- cron.py                 # APScheduler with SQLite-backed job store
 |
-|-- tests/                      # Automated test suite (v6.2+)
+|-- tests/                      # 336 automated tests (v6.2+)
 |   |-- __init__.py
-|   |-- test_sandbox.py         # 137 tests: blocked patterns (30), allowed cmds (13), working dir (4), pip mapping (6), import parsing (7), interpreter blocking (7), find blocking (5), encoding bypass (3), home move blocking (4), dotfile protection (9), env filtering (6), traceback extraction (4), pipe-to-shell (6), eval (2), bash string splitting (4), code scanner (14), file detection (6), artifact filter (7)
-|   |-- test_auditor.py         # 12 tests: JSON extraction edge cases
-|   |-- test_executor.py        # 18 tests: markdown extraction, timeout estimation, param extraction
-|   |-- test_classifier.py      # 5 tests: fallback ordering (imports _FALLBACK_ORDER from source)
+|   |-- test_sandbox.py         # 174 tests: blocked patterns (30), allowed cmds (13), working dir (4), pip mapping (6), import parsing (7), interpreter blocking (7), find blocking (5), encoding bypass (3), home move blocking (4), dotfile protection (9), env filtering (6), traceback extraction (4), pipe-to-shell (6), eval (2), bash string splitting (4), code scanner (14), file detection (6), artifact filter (26), walk artifacts (6), artifact sanity check (3), stdout fallback (7), stdin devnull (2)
+|   |-- test_executor.py        # 34 tests: markdown extraction (10), timeout estimation (4), param extraction (4), import error parsing (12), dependency bootstrapping (4)
+|   |-- test_docker_sandbox.py  # 28 tests: Docker availability (8), command building (7), routing (3), execution integration (6), security integration (4)
+|   |-- test_handlers.py        # 27 tests: auth (4), resource guards (5), message splitting (5), file upload (4), artifact delivery (2), scheduled timeout (1), error sanitization (5), rate limit retry (1)
+|   |-- test_auditor.py         # 22 tests: JSON extraction (12), environment error detection (10)
+|   |-- test_budget.py          # 13 tests: budget enforcement (2), model costs (3), thinking tokens (5), API retries (3)
 |   |-- test_file_manager.py    # 12 tests: CSV metadata, empty files, truncation, UUID uploads
-|   |-- test_budget.py          # 10 tests: budget enforcement, model costs, thinking token tracking
-|   |-- test_db.py              # 6 tests: prune_old_data epoch handling, crash recovery
-|   |-- test_docker_sandbox.py  # 28 tests: Docker isolation (unit, integration, security)
-|   |-- test_handlers.py        # 19 tests: auth, resource guards, message splitting, file upload, scheduled timeout
-|   |-- test_e2e_artifact_delivery.py  # 6 tests: realistic project execution with artifact detection
+|   |-- test_db.py              # 8 tests: prune_old_data epoch handling (3), crash recovery (3), task pruning (2)
+|   |-- test_e2e_artifact_delivery.py  # 8 tests: realistic project execution with artifact detection
+|   |-- test_classifier.py      # 5 tests: fallback ordering (imports _FALLBACK_ORDER from source)
 |   +-- test_pipeline_integration.py  # 5 tests: full pipeline with mocked Claude API
 |
 |-- scripts/                    # Utility scripts
@@ -525,6 +525,18 @@ MAX_RETRIES=3
 API_MAX_RETRIES=5
 MAX_FILE_SIZE_MB=50
 ```
+
+#### Budget Controls (Optional but Recommended)
+
+Add daily and/or monthly API spend limits to `.env` to prevent runaway costs:
+```
+DAILY_BUDGET_USD=5       # Max $5/day on API calls
+MONTHLY_BUDGET_USD=50    # Max $50/month on API calls
+```
+
+When a limit is hit, all API calls are rejected and tasks fail with a clear budget-exceeded message. The bot remains responsive — you can still use `/cost` to check spend and `/health` for status. Set to `0` (default) for unlimited spend.
+
+Check your current spend anytime with the `/cost` command in Telegram, which shows today's spend, this month's spend, and all-time totals broken down by model.
 
 ### Step 3: Install Dependencies
 
@@ -1062,7 +1074,12 @@ Status is polled every 3 seconds from the thread-safe stage tracker in `brain/gr
 
 ### What It Is
 
-The project registry (`projects.yaml`) tells AgentCore about your existing codebases. Instead of generating new code from scratch, the agent can invoke registered projects by matching trigger keywords in your message, then generating and executing the appropriate shell commands.
+The project registry is what makes AgentCore more than a code-generating chatbot. By registering your existing projects in `projects.yaml`, the agent becomes a CLI co-pilot for your actual codebases — it matches natural language requests to your real tools and runs them with the right parameters.
+
+**Without project registration:** You say "scrape jobs" and the agent writes a generic scraping script from scratch.
+**With project registration:** You say "scrape jobs" and the agent runs your actual scraper (`python3 -m scraper scrape --all --workers 5`) in its real directory with its real venv — no code generation needed.
+
+The registry file (`projects.yaml`) tells AgentCore about your existing codebases. Instead of generating new code from scratch, the agent matches trigger keywords in your message, then generates and executes the appropriate shell commands in your project's directory.
 
 ### File Format
 
@@ -1131,15 +1148,54 @@ Claude generates the actual command by reading the plan and filling in placehold
 
 ### Adding a New Project
 
-1. Open `projects.yaml`
-2. Add a new entry under `projects:`
-3. Set the `path` to the absolute project root
-4. Write a detailed `description` -- Claude uses this to understand the project
-5. List available `commands` with exact shell syntax
-6. Set `timeout` high enough for the longest command
-7. Set `requires_file: true` if the project needs uploaded data
-8. Add 3-6 trigger keywords that are specific enough to avoid false matches
-9. Restart AgentCore (the registry is loaded at startup)
+**Step 1: Start from the example template**
+
+If you don't have a `projects.yaml` yet, copy the included example:
+```bash
+cp projects.yaml.example projects.yaml
+```
+
+The example file contains 3 fully documented project templates (scraper, data pipeline, full-stack app) you can modify.
+
+**Step 2: Add your project entry**
+
+Open `projects.yaml` and add a new entry under `projects:`:
+
+```yaml
+  - name: "My Data Pipeline"
+    path: "/Users/you/projects/data-pipeline"   # Must be absolute, must exist
+    description: |
+      Processes raw CSV uploads through deduplication, normalisation,
+      and classification. Input: Excel file. Output: cleaned CSV + report.
+      Run with: python3 -m pipeline --input <file>
+    commands:
+      clean: "python3 -m pipeline --input {file}"    # {file} = filled from user upload
+      stats: "python3 -m pipeline --stats"
+    timeout: 300                                      # 5 minutes max
+    requires_file: true                               # Needs a file upload to work
+    venv: "/Users/you/projects/data-pipeline/venv"   # Optional: Python venv path
+    triggers:
+      - "clean data"
+      - "data pipeline"
+      - "process data"
+```
+
+**Step 3: Write good triggers**
+
+Triggers are case-insensitive substring matches against your message. Tips:
+- Use 3-6 triggers per project — enough to catch natural variations
+- Make them specific enough to avoid false matches across projects
+- Longer triggers have higher priority (e.g., "affiliate job scraper" beats "job")
+- Test by sending a message to the bot and checking if it classifies as `project`
+
+**Step 4: Restart and test**
+
+The registry is loaded at startup, so restart AgentCore:
+```bash
+python3 main.py
+```
+
+Then send a message matching one of your triggers. Use `/projects` to verify all projects loaded correctly.
 
 ### Current Projects (8)
 
@@ -1153,6 +1209,95 @@ Claude generates the actual command by reading the plan and filling in placehold
 | Industry Voices Benchmarks | phase1-3, finalize, full | 300s | industry voices, iv benchmark |
 | Suppliers Database | refresh | 600s | supplier, vendor database, regulatory |
 | Newsletter Benchmarks | (none) | 60s | newsletter, pentasia |
+
+---
+
+## Extending AgentCore
+
+AgentCore is a working system, not a framework — but it's built so you can extend it without fighting the architecture. Below are the most common extension points with concrete steps.
+
+### Adding a New Task Type
+
+Every task type flows through the same 5-stage pipeline, so adding a new type means teaching each stage about it.
+
+**Files to modify:**
+1. `brain/nodes/classifier.py` — Add the type name to the classification prompt and `_FALLBACK_ORDER`
+2. `brain/nodes/planner.py` — Add a task-specific system prompt (e.g., `TESTING_SYSTEM`) with domain-relevant instructions
+3. `brain/nodes/auditor.py` — Add an entry to `AUDIT_CRITERIA` dict with pass/fail rules specific to the type
+4. `brain/nodes/executor.py` — (Optional) Add specialized execution logic if the type needs something beyond `run_code()`/`run_shell()`
+
+**Example:** Adding a "testing" type that generates and runs test suites:
+- Classifier recognizes "write tests for", "test this function"
+- Planner prompt instructs Claude to use pytest conventions and assert coverage
+- Auditor checks that all tests pass and coverage meets a threshold
+- Executor uses the existing `run_code()` — no changes needed
+
+### Adding a New Bot Command
+
+**Files to modify:**
+1. `bot/handlers.py` — Write an async handler function decorated with `@auth_required`
+2. `bot/telegram_bot.py` — Register it in `create_bot()` with `app.add_handler(CommandHandler("yourcommand", cmd_yourcommand))`
+3. Update the `/help` output in `cmd_start` to list the new command
+
+**Example:** Adding a `/stats` command:
+```python
+# In bot/handlers.py
+@auth_required
+async def cmd_stats(update, context):
+    # Gather metrics, format response
+    await update.message.reply_text(stats_text)
+```
+
+### Customizing Sandbox Security Rules
+
+The command blocklist and code scanner are regex-based and easy to extend.
+
+**Files to modify:**
+- `tools/sandbox.py` — `_BLOCKED_PATTERNS` (shell command blocklist), `_DANGEROUS_CODE_PATTERNS` (Python code scanner), `_LOGGED_PATTERNS` (audit-only logging)
+
+**To block a new command pattern:** Add a tuple `(compiled_regex, "Human-readable reason")` to `_BLOCKED_PATTERNS`. The command is rejected before execution with the reason shown to the user.
+
+**To allow something currently blocked:** Remove the pattern — but understand why it was blocked first. Most patterns prevent accidental destructive operations from LLM hallucination.
+
+### Integrating External Services
+
+AgentCore's `tools/` directory is the natural home for new integrations. Each tool module exposes functions that pipeline nodes can call.
+
+**Steps:**
+1. Create a new module in `tools/` (e.g., `tools/slack_notifier.py`)
+2. Import and call it from the relevant pipeline node (usually `executor.py` or `deliverer.py`)
+3. Add any required config vars to `config.py` and `.env.example`
+
+**Examples:** Slack notifications on task completion, database connections for direct SQL queries, webhook triggers for CI/CD pipelines.
+
+### Scheduled Tasks
+
+Set up recurring automation directly from Telegram:
+
+```
+/schedule 360 Run the job scraper          # Every 6 hours
+/schedule 1440 Send me the daily briefing  # Every 24 hours
+/schedule 60 Check if example.com is up    # Every hour
+```
+
+Jobs are stored in SQLite and survive reboots. Manage with `/schedule list` (see all jobs) and `/schedule remove <id>` (cancel a job). Each scheduled run goes through the full pipeline — classify, plan, execute, audit, deliver — so it gets the same quality checks as interactive tasks.
+
+### Using Local AI Models (Ollama)
+
+For cost-sensitive tasks, privacy-sensitive data, or offline operation, AgentCore can use locally running Ollama models.
+
+**Setup:**
+1. Install Ollama: `brew install ollama` (macOS) or see [ollama.ai](https://ollama.ai)
+2. Pull a model: `ollama pull llama3.1:8b`
+3. Configure in `.env`:
+   ```
+   OLLAMA_BASE_URL=http://localhost:11434
+   OLLAMA_DEFAULT_MODEL=llama3.1:8b
+   ```
+
+**When to use:** Batch classification of hundreds of rows (avoids API costs), processing confidential data that shouldn't leave your machine, or when your internet is down.
+
+The agent can also decide to use Ollama autonomously — for example, using local AI for bulk classification while using Claude for the planning and auditing stages.
 
 ---
 

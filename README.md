@@ -4,7 +4,7 @@
 
 AgentCore is a self-hosted Telegram bot backed by a [LangGraph](https://github.com/langchain-ai/langgraph) pipeline and the Claude API. You send it tasks from your phone, it classifies the request, plans the approach, executes code in a sandbox, audits the output with a *different* model, and delivers the result — all on your own hardware.
 
-This isn't a framework or a library. It's a working system: **~6,900 lines of production Python**, **235 automated tests**, and **11 registered projects** running real daily workflows (web scraping, report generation, data analysis, competitive intelligence) on a Mac Mini M2.
+This isn't a framework or a library. It's a working system: **~6,900 lines of production Python**, **336 automated tests**, and **11 registered projects** running real daily workflows (web scraping, report generation, data analysis, competitive intelligence) on a Mac Mini M2.
 
 ```
 You (Telegram)
@@ -92,7 +92,7 @@ AgentCore/
 │   ├── build_sandbox.sh    # Docker image builder
 │   ├── secure_deploy.sh    # Deployment hardening (permissions, backups)
 │   └── monthly_maintenance.sh  # DB vacuum, cache cleanup
-├── tests/                  # 235 tests across 11 files (unit + integration + security)
+├── tests/                  # 336 tests across 11 files (unit + integration + security)
 ├── projects.yaml           # Your registered projects
 ├── projects.yaml.example   # Example project registry with 3 templates
 ├── .env.example            # Configuration template
@@ -143,10 +143,16 @@ pip install -r requirements.txt
 # 4. Configure environment
 cp .env.example .env
 # Edit .env — fill in ANTHROPIC_API_KEY, TELEGRAM_BOT_TOKEN, ALLOWED_USER_IDS
+#
+# Optional but recommended — set API spend limits:
+#   DAILY_BUDGET_USD=5
+#   MONTHLY_BUDGET_USD=50
+# (0 = unlimited. Check spend anytime with /cost in Telegram)
 
-# 5. (Optional) Register your projects
+# 5. (Optional) Register your projects — this is the killer feature
 cp projects.yaml.example projects.yaml
 # Edit projects.yaml with your project paths and commands
+# See AGENTCORE.md "Project Registry Guide" for the full walkthrough
 
 # 6. Start the bot
 python3 main.py
@@ -794,7 +800,7 @@ Output: A 365-line Markdown report with comparison matrices, deployment scoring 
 
 ## What This Is (and Isn't)
 
-**This is:** A reference implementation of a personal AI agent with production-quality features — cross-model adversarial auditing, project orchestration, defense-in-depth security, budget enforcement, crash recovery, scheduled tasks, and 235 automated tests. It's been running real daily workflows since February 2026.
+**This is:** A reference implementation of a personal AI agent with production-quality features — cross-model adversarial auditing, project orchestration, defense-in-depth security, budget enforcement, crash recovery, scheduled tasks, and 336 automated tests. It's been running real daily workflows since February 2026.
 
 **This isn't:** A framework, a library, or a SaaS product. It's deeply personal by design — built for one user on one machine. You're welcome to fork it, learn from the patterns, or adapt it for your own setup.
 
@@ -819,7 +825,7 @@ Output: A 365-line Markdown report with comparison matrices, deployment scoring 
 
 ## Tests
 
-235 automated tests across 11 files, organized in three tiers:
+336 automated tests across 11 files, organized in three tiers:
 
 ```bash
 # Run all tests
@@ -834,15 +840,16 @@ python3 -m pytest tests/test_sandbox.py -v
 
 | Test File | Tests | Covers |
 |-----------|-------|--------|
-| `test_sandbox.py` | 124 | Command blocklist, code scanner, shell execution, path validation |
-| `test_docker_sandbox.py` | 28 | Docker availability, container builds, security isolation |
-| `test_handlers.py` | 19 | Bot commands, authentication, message routing |
-| `test_executor.py` | 14 | Code generation, project operations, parameter extraction |
-| `test_auditor.py` | 12 | Audit parsing, verdict extraction, JSON handling |
-| `test_file_manager.py` | 12 | Upload dedup, path traversal, dotfile protection |
-| `test_budget.py` | 10 | Cost tracking, budget enforcement, thinking tokens |
-| `test_db.py` | 6 | Task CRUD, crash recovery, data pruning |
-| `test_classifier.py` | 5 | Task type routing, trigger matching |
+| `test_sandbox.py` | 174 | Command blocklist (30), code scanner (14), shell execution, path validation, artifact filtering (26), stdin isolation, pip mapping |
+| `test_executor.py` | 34 | Markdown extraction, timeout estimation, parameter extraction, import error parsing (12), dependency bootstrapping (4) |
+| `test_docker_sandbox.py` | 28 | Docker availability, container builds, command routing, security isolation |
+| `test_handlers.py` | 27 | Authentication, resource guards, message splitting, file upload, scheduled timeout, error sanitization, rate limiting |
+| `test_auditor.py` | 22 | JSON extraction (12), environment error detection (10) |
+| `test_budget.py` | 13 | Budget enforcement, model costs, thinking token tracking, API retry config |
+| `test_file_manager.py` | 12 | Upload dedup, path traversal, dotfile protection, UUID naming |
+| `test_e2e_artifact_delivery.py` | 8 | Realistic project execution with artifact detection, venv/pip metadata filtering |
+| `test_db.py` | 8 | Task CRUD, crash recovery, data pruning, epoch handling |
+| `test_classifier.py` | 5 | Task type routing, fallback ordering |
 | `test_pipeline_integration.py` | 5 | End-to-end pipeline with mocked Claude responses |
 
 ---

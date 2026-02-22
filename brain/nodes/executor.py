@@ -312,26 +312,32 @@ IMPORTANT: Use the filled-in commands above. Do NOT leave {{file}} or {{client}}
             (result.traceback or result.stderr or "(no stderr)")[:500],
         )
 
-    # Auto-install on ImportError (mirrors run_code_with_auto_install behaviour)
-    if not result.success:
+    # Auto-install loop: install missing modules one at a time, re-run after each.
+    # Handles projects with many undeclared deps without burning pipeline retries.
+    pip_bin = f"{venv}/bin/pip" if venv else "pip3"
+    for _install_attempt in range(5):
+        if result.success:
+            break
         missing = _parse_import_error_from_result(result)
-        if missing:
-            logger.info("Project missing module '%s', attempting auto-install", missing)
-            pip_bin = f"{venv}/bin/pip" if venv else "pip3"
-            install_result = run_shell(
-                f"{pip_bin} install {missing}",
-                working_dir=project_path,
-                timeout=120,
-                venv_path=venv,
-            )
-            if install_result.success:
-                logger.info("Auto-installed %s, retrying project execution", missing)
-                result = run_shell(
-                    command=f"bash -e /dev/stdin <<'{delimiter}'\n{code}\n{delimiter}",
-                    working_dir=project_path,
-                    timeout=timeout,
-                    venv_path=venv,
-                )
+        if not missing:
+            break  # Not an import error — stop trying
+        logger.info("Project missing module '%s', attempting auto-install (%d/5)", missing, _install_attempt + 1)
+        install_result = run_shell(
+            f"{pip_bin} install {missing}",
+            working_dir=project_path,
+            timeout=120,
+            venv_path=venv,
+        )
+        if not install_result.success:
+            logger.warning("Failed to install %s: %s", missing, (install_result.stderr or "")[:200])
+            break
+        logger.info("Auto-installed %s, retrying project execution", missing)
+        result = run_shell(
+            command=f"bash -e /dev/stdin <<'{delimiter}'\n{code}\n{delimiter}",
+            working_dir=project_path,
+            timeout=timeout,
+            venv_path=venv,
+        )
 
     # For project tasks, filter excessive artifacts (likely venv/package leak)
     artifacts = result.files_created

@@ -55,6 +55,10 @@ async def init_db():
         await db.execute(_CREATE_TASKS)
         await db.execute(_CREATE_CONVERSATION_CONTEXT)
         await db.execute(_CREATE_CONVERSATION_HISTORY)
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_tasks_user_time ON tasks(user_id, created_at)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_context_user ON conversation_context(user_id)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_history_user ON conversation_history(user_id)")
         await db.commit()
     logger.info("Database initialized at %s (WAL mode)", config.DB_PATH)
 

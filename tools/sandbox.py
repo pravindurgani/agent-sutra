@@ -79,6 +79,15 @@ _BLOCKED_PATTERNS = [
     r"\beval\b\s+\"?\$\(",
     # bash/sh -c with embedded empty quotes (string splitting obfuscation)
     r"""\b(bash|sh)\s+-c\s+.*(?:'{2}|"{2})""",
+    # xargs piped to destructive commands
+    r"\bxargs\b.*\brm\b",
+    r"\bxargs\b.*\bdel\b",
+    # rsync with --delete (can wipe destination)
+    r"\brsync\b.*--delete\b",
+    # truncate (can zero out files)
+    r"\btruncate\b",
+    # crontab (persistence mechanism)
+    r"\bcrontab\b",
 ]
 _BLOCKED_RE = [re.compile(p, re.IGNORECASE) for p in _BLOCKED_PATTERNS]
 
@@ -250,6 +259,10 @@ def _build_docker_cmd(
         "--network", config.DOCKER_NETWORK,
         # Run as host user to preserve file ownership
         "--user", f"{uid}:{gid}",
+        # Security hardening
+        "--cap-drop", "ALL",
+        "--security-opt", "no-new-privileges",
+        "--pids-limit", "256",
         # Working directory inside container
         "-w", str(working_dir),
         # Image
@@ -362,6 +375,9 @@ def _docker_pip_install(package: str) -> ExecutionResult:
             "-v", f"{config.DOCKER_PIP_CACHE}:/pip-cache",
             "-e", "PIP_TARGET=/pip-cache",
             "--network", config.DOCKER_NETWORK,
+            "--cap-drop", "ALL",
+            "--security-opt", "no-new-privileges",
+            "--pids-limit", "256",
             config.DOCKER_IMAGE,
             "pip", "install", package,
         ]

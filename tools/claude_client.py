@@ -185,7 +185,14 @@ def call(
             else:
                 kwargs["temperature"] = temperature
 
-            response = _get_client().messages.create(**kwargs)
+            # Streaming required for thinking calls — Anthropic enforces a
+            # 10-minute hard limit on non-streaming requests, and complex
+            # thinking tasks easily exceed that.
+            if thinking and config.ENABLE_THINKING:
+                with _get_client().messages.stream(**kwargs) as stream:
+                    response = stream.get_final_message()
+            else:
+                response = _get_client().messages.create(**kwargs)
 
             # Track usage (in-memory + persist to SQLite)
             usage_ts = time.time()

@@ -11,6 +11,16 @@ A self-hosted Telegram bot that classifies your task, writes code, executes it i
 
 ---
 
+## What This Is (and Isn't)
+
+**This is:** A working personal AI agent — cross-model auditing, project orchestration, defense-in-depth security, budget enforcement, scheduled tasks, and 330+ tests. Running real daily workflows since February 2026.
+
+**This isn't:** A framework, a library, or a SaaS product. Built for one user on one machine. Fork it, learn from the patterns, or adapt it.
+
+**Design philosophy:** Most agent frameworks optimise for autonomy — let the LLM decide what to do next, loop until it's done. AgentSutra optimises for reliability. The pipeline is a fixed 5-stage graph, not a free-form loop. Every output is gated by a different model family before delivery. The project registry gives the agent real commands to run instead of letting it guess. The result is predictable, auditable, and boring in the best way.
+
+---
+
 ## How It Works
 
 ```
@@ -30,7 +40,7 @@ Failed audits retry up to 3 times with traceback injection.
 ## Key Capabilities
 
 - **Cross-Model Adversarial Auditing** — Sonnet writes code, Opus reviews it before delivery. Different model families catch different failure modes. Every output is gated.
-- **Project Registry** — Register your local projects in `projects.yaml`. Say "run the job scraper" in Telegram and the agent matches triggers, activates the right venv, and runs commands in the right directory.
+- **Project Registry** — Register your local projects in `projects.yaml`. Say "run the job scraper" in Telegram and the agent matches triggers, runs commands in the right directory, and auto-manages a shared project venv for dependencies.
 - **7 Task Types** — Code generation, data analysis, research, project operations, file processing, creative writing, general Q&A. Each with tailored system prompts and audit criteria.
 - **Full System Access (with guardrails)** — Shell access, internet, pip install, Ollama, big data, frontend generation. Hardened with a 34-pattern command blocklist, code scanner, Docker isolation, credential stripping, budget enforcement, and the Opus audit gate.
 - **Schedule & Forget** — APScheduler with SQLite persistence. Schedule recurring tasks from Telegram with `/schedule 1440 Daily briefing`. Jobs survive reboots.
@@ -186,7 +196,7 @@ AgentSutra/
 3. **Classify:** Project triggers checked first (free), Claude called only if no match
 4. **Plan + Execute:** Sonnet generates a plan, writes code, runs it in sandbox (Docker or subprocess)
 5. **Audit:** Opus reviews the output — on failure, retry loop feeds traceback back to the planner (max 3)
-6. **Deliver:** Formatted result + artifact files sent back via Telegram
+6. **Deliver:** Formatted result + artifact files sent back via Telegram. Failed tasks are reported honestly — the deliverer never fabricates success
 
 > Full 5-stage pipeline breakdown with cost estimates: [AGENTSUTRA.md — How the Pipeline Works](AGENTSUTRA.md#how-the-pipeline-works)
 
@@ -287,16 +297,6 @@ All configuration is via `.env`. See `.env.example` for the full template.
 | Visualization | matplotlib, seaborn |
 | Local AI | [Ollama](https://ollama.ai/) |
 | Monitoring | psutil (RAM, disk, concurrent tasks) |
-
----
-
-## What This Is (and Isn't)
-
-**This is:** A working personal AI agent — cross-model auditing, project orchestration, defense-in-depth security, budget enforcement, scheduled tasks, and 330+ tests. Running real daily workflows since February 2026.
-
-**This isn't:** A framework, a library, or a SaaS product. Built for one user on one machine. Fork it, learn from the patterns, or adapt it.
-
-**Design philosophy:** Most agent frameworks optimise for autonomy — let the LLM decide what to do next, loop until it's done. AgentSutra optimises for reliability. The pipeline is a fixed 5-stage graph, not a free-form loop. Every output is gated by a different model family before delivery. The project registry gives the agent real commands to run instead of letting it guess. The result is predictable, auditable, and boring in the best way.
 
 ---
 

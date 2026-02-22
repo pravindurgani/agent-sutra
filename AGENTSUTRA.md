@@ -1,8 +1,8 @@
-# AgentSutra v6.11 - Complete Project Documentation
+# AgentSutra v7.0.0 - Complete Project Documentation
 
-A Telegram-driven AI agent server running on Mac Mini M2 (16GB). Receives tasks via Telegram, processes them through a LangGraph Plan-Execute-Audit pipeline powered by Claude API, and delivers results back. Features: project registry, cross-model adversarial auditing (Sonnet+Opus), full internet access, local AI orchestration (Ollama), big data processing, production frontend generation, Docker container isolation for code execution, 7 task types, 11 commands, budget enforcement, RAM guards, code content scanner, 34-pattern command blocklist, environment error detection, project dependency bootstrapping, and 336 automated tests.
+A Telegram-driven AI agent server running on Mac Mini M2 (16GB). Receives tasks via Telegram, processes them through a LangGraph Plan-Execute-Audit pipeline powered by Claude API, and delivers results back. Features: project registry with shared auto-managed venv, cross-model adversarial auditing (Sonnet+Opus), full internet access, local AI orchestration (Ollama), big data processing, production frontend generation, Docker container isolation for code execution, 7 task types, 11 commands, budget enforcement, RAM guards, code content scanner, 34-pattern command blocklist, environment error detection, project dependency bootstrapping, streaming for extended thinking, honest failure delivery, and 330+ automated tests.
 
-**Last updated:** 2026-02-21
+**Last updated:** 2026-02-22
 
 ---
 
@@ -164,7 +164,7 @@ AgentSutra/
 |   |-- __init__.py
 |   +-- cron.py                 # APScheduler with SQLite-backed job store
 |
-|-- tests/                      # 336 automated tests (v6.2+)
+|-- tests/                      # 330+ automated tests (v6.2+)
 |   |-- __init__.py
 |   |-- test_sandbox.py         # 174 tests: blocked patterns (30), allowed cmds (13), working dir (4), pip mapping (6), import parsing (7), interpreter blocking (7), find blocking (5), encoding bypass (3), home move blocking (4), dotfile protection (9), env filtering (6), traceback extraction (4), pipe-to-shell (6), eval (2), bash string splitting (4), code scanner (14), file detection (6), artifact filter (26), walk artifacts (6), artifact sanity check (3), stdout fallback (7), stdin devnull (2)
 |   |-- test_executor.py        # 34 tests: markdown extraction (10), timeout estimation (4), param extraction (4), import error parsing (12), dependency bootstrapping (4)
@@ -310,7 +310,8 @@ AgentSutra/
 - Project tasks (v2): shows project name in success message ("Project 'X' executed successfully.")
 - Code tasks: includes code in backtick blocks (truncated at 3500 chars with note about attached file)
 - Data/file/automation/project tasks: extracts Output section from execution result, strips error sections
-- Failed tasks: includes retry count and truncated audit feedback (500 chars)
+- **Honest failure reporting (v7):** When verdict is FAIL, the deliverer injects hard constraints into the summary prompt — "This task FAILED. Do NOT claim files were created unless listed." Prevents Claude from fabricating success narratives based on the plan
+- Failed tasks: clearly state what failed, include audit feedback, and never claim artifacts were generated unless they actually exist
 - Lists artifact file count and names for attachment
 
 ### `tools/claude_client.py` - Claude API Wrapper
@@ -320,6 +321,8 @@ AgentSutra/
   - `RateLimitError`: exponential backoff starting at 4s
   - `APITimeoutError`: exponential backoff starting at 1s
   - `APIError`: exponential backoff with rethrow on final attempt
+  - **Streaming for thinking calls (v7):** Uses `messages.stream()` with `get_final_message()` when thinking is enabled, avoiding Anthropic's 10-minute hard limit on non-streaming requests
+  - **128k thinking headroom (v7):** Floors `max_tokens` at 128,000 when thinking is enabled to prevent thinking-only responses (where Claude consumes the entire token budget on thinking with zero text output)
   - **WARNING docstring (v2.2):** Explicitly warns that `time.sleep()` is safe only inside `asyncio.to_thread()` context
 - **Persistent usage tracking (v2.2):** Every API call is persisted to SQLite (`api_usage` table in `agentsutra.db`) via synchronous `sqlite3` with `threading.Lock` for thread safety. Survives process restarts.
 - `MODEL_COSTS` dict: per-model cost rates (input/output per 1M tokens) for Sonnet ($3/$15), Opus ($15/$75), Haiku ($0.80/$4)
@@ -1563,6 +1566,45 @@ AgentSutra was independently stress-tested using a 4-category evaluation protoco
 ---
 
 ## Changelog
+
+### v7.0.0 - 2026-02-22 - Shared Project Venv, Streaming, Honest Delivery
+
+Major release addressing production failures discovered during Mac Mini deployment.
+
+**Shared project venv (config.py, main.py, executor.py):**
+- AgentSutra now auto-creates and manages a shared venv at `workspace/project_venv/` for registered projects that don't specify their own `venv:` key
+- Eliminates the need for manual venv creation per project — dependencies auto-install on first run
+- Startup includes a smoke test (`pip --version`) to detect broken venvs from Python upgrades
+- Projects with their own `venv:` key are unaffected. Ad-hoc code tasks still use system Python (isolation boundary)
+- If a project needs dependency isolation, add `venv:` to its config — the escape hatch is built in
+
+**Streaming for thinking calls (claude_client.py):**
+- Switched to `messages.stream()` with `get_final_message()` when extended thinking is enabled
+- Fixes Anthropic's 10-minute hard timeout on non-streaming requests, which killed complex thinking tasks
+- Non-thinking calls remain as `messages.create()` (no change)
+
+**128k thinking headroom (claude_client.py):**
+- Raised `max_tokens` floor from 16,000 to 128,000 when thinking is enabled
+- Fixes "Claude returned no text content" errors where Claude consumed the entire token budget on thinking with zero text output, failing after 5 retries
+
+**Honest failure delivery (deliverer.py):**
+- When audit verdict is FAIL, the deliverer now injects hard constraints: "This task FAILED. Do NOT claim files were created unless listed."
+- Updated system prompt with critical rule against fabricating success
+- Updated fallback response to clearly state "Task FAILED" instead of "completed with issues"
+- Fixes a bug where the deliverer told the user "HTML file created successfully" when no HTML was ever generated (fabricated from the plan, not the actual execution result)
+
+**Project execution stderr logging (executor.py):**
+- Project execution failures now log stderr/traceback to `agentsutra.log`
+- Previously, failed project scripts showed only "No artifacts detected" with no indication of WHY
+
+**Modified files:**
+- `config.py` — added `PROJECTS_VENV_DIR` path constant
+- `main.py` — added `_ensure_shared_project_venv()` bootstrap with smoke test
+- `brain/nodes/executor.py` — shared venv fallback + stderr logging on project failure
+- `brain/nodes/deliverer.py` — honest failure reporting in prompt, system prompt, and fallback
+- `tools/claude_client.py` — streaming for thinking calls, 128k max_tokens floor
+
+---
 
 ### v6.11 - 2026-02-21 - Sandbox & Project Execution Fixes
 

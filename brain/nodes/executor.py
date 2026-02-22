@@ -243,7 +243,7 @@ def _execute_project(state: AgentState) -> dict:
         }
 
     timeout = project.get("timeout", 300)
-    venv = project.get("venv")
+    venv = project.get("venv") or str(config.PROJECTS_VENV_DIR)
 
     # Bootstrap dependencies before first execution
     if state.get("retry_count", 0) == 0:

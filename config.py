@@ -12,6 +12,7 @@ WORKSPACE_DIR = BASE_DIR / "workspace"
 UPLOADS_DIR = WORKSPACE_DIR / "uploads"
 OUTPUTS_DIR = WORKSPACE_DIR / "outputs"
 PROJECTS_DIR = WORKSPACE_DIR / "projects"
+PROJECTS_VENV_DIR = WORKSPACE_DIR / "project_venv"
 DB_PATH = BASE_DIR / "storage" / "agentsutra.db"
 
 # Filesystem boundary — agent can operate anywhere within user's home directory

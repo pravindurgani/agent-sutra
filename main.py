@@ -30,6 +30,49 @@ from scheduler.cron import start_scheduler, stop_scheduler  # noqa: E402
 from tools.projects import load_projects  # noqa: E402
 
 
+def _ensure_shared_project_venv():
+    """Create and verify the shared project venv used when projects have no venv: key."""
+    venv_dir = config.PROJECTS_VENV_DIR
+    python_bin = venv_dir / "bin" / "python3"
+    pip_bin = venv_dir / "bin" / "pip"
+
+    def _create_venv():
+        import subprocess
+        logger.info("Creating shared project venv at %s", venv_dir)
+        subprocess.run(
+            [sys.executable, "-m", "venv", str(venv_dir)],
+            check=True, capture_output=True,
+        )
+
+    def _smoke_test() -> bool:
+        import subprocess
+        try:
+            result = subprocess.run(
+                [str(pip_bin), "--version"],
+                capture_output=True, text=True, timeout=10,
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    try:
+        if not python_bin.exists():
+            _create_venv()
+
+        if not _smoke_test():
+            logger.warning("Shared project venv broken, recreating")
+            import shutil
+            shutil.rmtree(venv_dir, ignore_errors=True)
+            _create_venv()
+            if not _smoke_test():
+                logger.error("Failed to create working shared project venv")
+                return
+
+        logger.info("Shared project venv ready at %s", venv_dir)
+    except Exception as e:
+        logger.error("Failed to bootstrap shared project venv: %s", e)
+
+
 def main():
     """Main entry point."""
     # Validate config
@@ -60,6 +103,9 @@ def main():
     asyncio.run(prune_old_data())
     cleanup_workspace_files()
     logger.info("Storage cleanup completed")
+
+    # Bootstrap shared project venv (for projects without their own venv: key)
+    _ensure_shared_project_venv()
 
     # Python 3.9 fix: asyncio.run() closes the event loop it creates.
     # python-telegram-bot's ApplicationBuilder needs an active loop.

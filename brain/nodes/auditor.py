@@ -248,6 +248,11 @@ _ENV_ERROR_PATTERNS = [
     ("No space left on device", "Disk full"),
     # Network unreachable in sandbox
     ("Name or service not known", "DNS resolution failed (no network access)"),
+    # Execution timeouts — retrying the same code with the same timeout will fail again
+    # run_shell returns: "Timed out after {t}s" ; run_code returns: "Execution timed out after {t}s"
+    ("Timed out after", "Execution timed out (increasing timeout or optimising the command may help)"),
+    ("timed out after", "Execution timed out (increasing timeout or optimising the command may help)"),
+    ("killed process group", "Process was killed due to timeout"),
     # NOTE: "Permission denied" and "Connection refused" intentionally excluded.
     # These are frequently code-level errors (wrong path, wrong port) that the
     # audit-retry loop CAN fix. Only truly unrecoverable infrastructure failures

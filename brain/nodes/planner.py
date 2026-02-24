@@ -189,6 +189,17 @@ def plan(state: AgentState) -> dict:
     else:
         system = CODE_SYSTEM.format(tdd=TDD_INSTRUCTION)
 
+    # Inject user's coding standards for tasks that GENERATE code
+    # (not project tasks — they run existing commands, standards don't apply)
+    if task_type in ("code", "data", "automation", "file", "frontend", "ui_design"):
+        standards_path = config.BASE_DIR / ".agentsutra" / "standards.md"
+        if standards_path.exists():
+            try:
+                content = standards_path.read_text()[:2000]
+                system += f"\n\nUSER'S CODING STANDARDS (follow these strictly):\n{content}"
+            except OSError:
+                pass
+
     prompt = f"Task: {state['message']}"
 
     # Include conversation context if available

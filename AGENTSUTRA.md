@@ -501,7 +501,7 @@ _projects = data.get("projects", []) if data else []
 
 ### Prerequisites
 
-- Python 3.11+ (`python3 --version`)
+- Python 3.10+ (`python3 --version`), 3.11 recommended
 - pip (`pip3 --version`)
 - A Telegram account
 - An Anthropic API key with access to Claude Sonnet and Opus models
@@ -1518,7 +1518,7 @@ This requires ~30 lines of code changes across 2 files.
 ### Import errors on startup
 - Make sure venv is activated: `source venv/bin/activate`
 - Install dependencies: `pip install -r requirements.txt`
-- Verify Python version: `python3 --version` (need 3.11+)
+- Verify Python version: `python3 --version` (need 3.10+, 3.11 recommended)
 
 ### Database errors
 - Delete `storage/agentsutra.db` and restart -- it will be recreated (loses task history)

@@ -87,7 +87,7 @@ _BLOCKED_PATTERNS = [
     r"\bchmod\s+(-[rR]\s+|--recursive\s+)?(777|a\+rwx)\s+[/~]",
     # Interpreter inline code execution (perl -e, ruby -e, node -e)
     # NOTE: python3 -c removed from Tier 1 — it's a normal scripting pattern.
-    # It remains in _LOGGED_PATTERNS (line 94) for audit trail.
+    # It remains in _LOGGED_PATTERNS for audit trail.
     r"\bperl\s+-[eE]\s",
     r"\bruby\s+-[eE]\s",
     r"\bnode\s+-[eE]\s",

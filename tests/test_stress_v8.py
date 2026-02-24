@@ -385,42 +385,43 @@ class TestSyncLockDeadlock:
         conn.commit()
         conn.close()
 
-        # Use a barrier to ensure all threads start after table creation
-        barrier = threading.Barrier(3, timeout=10)
+        # Patch DB_PATH BEFORE spawning threads — threading + context managers
+        # can race if the patch is applied per-thread after barrier release.
         errors = []
+        original_db_path = config.DB_PATH
 
         def writer():
             try:
-                barrier.wait()
-                with patch.object(config, "DB_PATH", db_path):
-                    for i in range(20):
-                        sync_write_project_memory("proj", "success", f"w-{i}", f"t-{i}")
+                for i in range(20):
+                    sync_write_project_memory("proj", "success", f"w-{i}", f"t-{i}")
             except Exception as e:
                 errors.append(("writer", e))
 
         def reader():
             try:
-                barrier.wait()
-                with patch.object(config, "DB_PATH", db_path):
-                    for _ in range(20):
-                        sync_query_project_memories("proj", limit=5)
-                        time.sleep(0.005)
+                for _ in range(20):
+                    sync_query_project_memories("proj", limit=5)
+                    time.sleep(0.005)
             except Exception as e:
                 errors.append(("reader", e))
 
-        threads = [
-            threading.Thread(target=writer),
-            threading.Thread(target=reader),
-            threading.Thread(target=reader),
-        ]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=15)
+        config.DB_PATH = db_path
+        try:
+            threads = [
+                threading.Thread(target=writer),
+                threading.Thread(target=reader),
+                threading.Thread(target=reader),
+            ]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=15)
 
-        for t in threads:
-            assert not t.is_alive(), "Deadlock detected in concurrent R/W"
-        assert len(errors) == 0, f"R/W contention errors: {errors}"
+            for t in threads:
+                assert not t.is_alive(), "Deadlock detected in concurrent R/W"
+            assert len(errors) == 0, f"R/W contention errors: {errors}"
+        finally:
+            config.DB_PATH = original_db_path
 
 
 class TestOutputRegistryContamination:

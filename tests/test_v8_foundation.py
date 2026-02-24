@@ -146,29 +146,26 @@ class TestCodingStandardsInjection:
         """A 'code' task should include standards in the system prompt."""
         mock_call.return_value = "1. Do the thing"
 
-        # Create a temporary standards file
         import config
-        standards_dir = config.BASE_DIR / ".agentsutra"
-        standards_dir.mkdir(parents=True, exist_ok=True)
-        standards_file = standards_dir / "standards.md"
+        standards_file = config.BASE_DIR / ".agentsutra" / "standards.md"
+        original = standards_file.read_text() if standards_file.exists() else None
+        standards_file.parent.mkdir(parents=True, exist_ok=True)
         standards_file.write_text("Use pathlib, not os.path")
 
         try:
             from brain.nodes.planner import plan
             plan(self._make_state("code"))
             call_args = mock_call.call_args
-            system_prompt = call_args.kwargs.get("system", "") or call_args[1].get("system", "")
-            # Try positional if not in kwargs
-            if not system_prompt and len(call_args.args) > 1:
-                system_prompt = ""
-            # Check the system kwarg
+            system_prompt = ""
             for key, val in call_args.kwargs.items():
                 if key == "system":
                     system_prompt = val
             assert "USER'S CODING STANDARDS" in system_prompt
             assert "pathlib" in system_prompt
         finally:
-            if standards_file.exists():
+            if original is not None:
+                standards_file.write_text(original)
+            elif standards_file.exists():
                 standards_file.unlink()
 
     @patch("brain.nodes.planner.claude_client.call")
@@ -177,9 +174,9 @@ class TestCodingStandardsInjection:
         mock_call.return_value = "1. Run the command"
 
         import config
-        standards_dir = config.BASE_DIR / ".agentsutra"
-        standards_dir.mkdir(parents=True, exist_ok=True)
-        standards_file = standards_dir / "standards.md"
+        standards_file = config.BASE_DIR / ".agentsutra" / "standards.md"
+        original = standards_file.read_text() if standards_file.exists() else None
+        standards_file.parent.mkdir(parents=True, exist_ok=True)
         standards_file.write_text("Use pathlib, not os.path")
 
         try:
@@ -194,7 +191,9 @@ class TestCodingStandardsInjection:
                     system_prompt = val
             assert "USER'S CODING STANDARDS" not in system_prompt
         finally:
-            if standards_file.exists():
+            if original is not None:
+                standards_file.write_text(original)
+            elif standards_file.exists():
                 standards_file.unlink()
 
     @patch("brain.nodes.planner.claude_client.call")
@@ -203,10 +202,9 @@ class TestCodingStandardsInjection:
         mock_call.return_value = "1. Do the thing"
 
         import config
-        standards_dir = config.BASE_DIR / ".agentsutra"
-        standards_dir.mkdir(parents=True, exist_ok=True)
-        standards_file = standards_dir / "standards.md"
-        # Write a 5000-char file
+        standards_file = config.BASE_DIR / ".agentsutra" / "standards.md"
+        original = standards_file.read_text() if standards_file.exists() else None
+        standards_file.parent.mkdir(parents=True, exist_ok=True)
         long_content = "x" * 5000
         standards_file.write_text(long_content)
 
@@ -218,15 +216,15 @@ class TestCodingStandardsInjection:
             for key, val in call_args.kwargs.items():
                 if key == "system":
                     system_prompt = val
-            # The injected portion should be at most 2000 chars of content
-            # Find the injection point and verify length
             marker = "USER'S CODING STANDARDS (follow these strictly):\n"
             idx = system_prompt.find(marker)
             assert idx >= 0, "Standards marker not found"
             injected = system_prompt[idx + len(marker):]
             assert len(injected) <= 2000, f"Injected {len(injected)} chars, expected <= 2000"
         finally:
-            if standards_file.exists():
+            if original is not None:
+                standards_file.write_text(original)
+            elif standards_file.exists():
                 standards_file.unlink()
 
     @patch("brain.nodes.planner.claude_client.call")
@@ -236,12 +234,18 @@ class TestCodingStandardsInjection:
 
         import config
         standards_file = config.BASE_DIR / ".agentsutra" / "standards.md"
-        # Ensure file does NOT exist
-        if standards_file.exists():
-            standards_file.unlink()
+        original = standards_file.read_text() if standards_file.exists() else None
 
-        from brain.nodes.planner import plan
-        plan(self._make_state("code"))
+        try:
+            if standards_file.exists():
+                standards_file.unlink()
+            from brain.nodes.planner import plan
+            plan(self._make_state("code"))
+        finally:
+            # Restore the original file
+            if original is not None:
+                standards_file.parent.mkdir(parents=True, exist_ok=True)
+                standards_file.write_text(original)
         call_args = mock_call.call_args
         system_prompt = ""
         for key, val in call_args.kwargs.items():

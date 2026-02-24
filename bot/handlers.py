@@ -869,7 +869,8 @@ async def cmd_chain(update: Update, context: ContextTypes.DEFAULT_TYPE):
             p = Path(fpath)
             if p.exists() and p.stat().st_size > 0:
                 try:
-                    await update.message.reply_document(document=open(p, "rb"))
+                    with open(p, "rb") as f:
+                        await update.message.reply_document(document=f)
                 except Exception:
                     pass
     else:

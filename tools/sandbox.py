@@ -59,7 +59,7 @@ _docker_pip_lock = threading.Lock()
 _BLOCKED_PATTERNS = [
     # rm -rf targeting home, root, or user directories
     # Handles short flags (-rf), split flags (-r -f), and GNU long flags (--recursive --force)
-    r"\brm\s+(-{1,2}[\w-]+\s+)*\s*(/\s*$|~\s*$|~/\s*$|\$HOME)",
+    r"\brm\s+(-{1,2}[\w-]+\s+)*\s*(/\s*$|~\s*['\"]?\s*$|~/\s*$|\$HOME)",
     r"\brm\s+(-{1,2}[\w-]+\s+)*/Users\b",
     r"\brm\s+(-{1,2}[\w-]+\s+)*/home\b",
     # rm targeting critical home subdirectories
@@ -120,7 +120,7 @@ _BLOCKED_PATTERNS = [
     # crontab (persistence mechanism)
     r"\bcrontab\b",
 ]
-_BLOCKED_RE = [re.compile(p, re.IGNORECASE) for p in _BLOCKED_PATTERNS]
+_BLOCKED_RE = [re.compile(p, re.IGNORECASE | re.MULTILINE) for p in _BLOCKED_PATTERNS]
 
 # TIER 3: Allowed but logged for audit trail
 _LOGGED_PATTERNS = [

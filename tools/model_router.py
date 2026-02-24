@@ -43,7 +43,12 @@ def route_and_call(
 
     if provider == "ollama":
         try:
-            return _call_ollama(prompt, system, model, max_tokens)
+            result = _call_ollama(prompt, system, model, max_tokens)
+            if not result.strip():
+                logger.warning("Ollama returned empty response, falling back to Claude")
+                provider, model = "claude", config.DEFAULT_MODEL
+            else:
+                return result
         except Exception as e:
             logger.warning("Ollama call failed, falling back to Claude: %s", e)
             provider, model = "claude", config.DEFAULT_MODEL

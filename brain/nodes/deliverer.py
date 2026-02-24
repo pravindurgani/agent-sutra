@@ -156,12 +156,21 @@ def _extract_and_store_memory(state: AgentState) -> None:
 
 
 def _write_debug_sidecar(state: AgentState):
-    """Write per-task debug JSON for the /debug command."""
+    """Write per-task debug JSON for the /debug command.
+
+    Sanitizes paths to prevent leaking absolute home directory paths
+    into the debug sidecar (which is readable via /debug).
+    """
     try:
         import config as _cfg
+        # Sanitize message: strip absolute home directory paths
+        home_str = str(Path.home())
+        message = state["message"][:300]
+        message = message.replace(home_str, "~")
+
         sidecar = {
             "task_id": state["task_id"],
-            "message": state["message"][:300],
+            "message": message,
             "task_type": state.get("task_type", ""),
             "project_name": state.get("project_name", ""),
             "stages": state.get("stage_timings", []),

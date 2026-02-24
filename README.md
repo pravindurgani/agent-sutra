@@ -1,19 +1,19 @@
 # AgentSutra
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-383%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-527%20passed-brightgreen.svg)]()
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Claude API](https://img.shields.io/badge/LLM-Claude%20Sonnet%20%2B%20Opus-blueviolet.svg)]()
 
 **A private, autonomous AI agent for your Mac that actually gets work done.**
 
-A self-hosted Telegram bot that classifies your task, writes code, executes it in a sandbox, audits the output with a *different* AI model, and delivers the result. All on your own hardware. ~9,000 lines of production Python, 383+ tests, 13 commands, 11 registered projects.
+A self-hosted Telegram bot that classifies your task, writes code, executes it in a sandbox, audits the output with a *different* AI model, and delivers the result. All on your own hardware. ~9,000 lines of production Python, 527+ tests, 13 commands, 11 registered projects.
 
 ---
 
 ## What This Is (and Isn't)
 
-**This is:** A working personal AI agent — cross-model auditing, project orchestration, defense-in-depth security, budget enforcement, scheduled tasks, and 383+ tests. Running real daily workflows since February 2026.
+**This is:** A working personal AI agent — cross-model auditing, project orchestration, defense-in-depth security, budget enforcement, scheduled tasks, and 527+ tests. Running real daily workflows since February 2026.
 
 **This isn't:** A framework, a library, or a SaaS product. Built for one user on one machine. Fork it, learn from the patterns, or adapt it.
 
@@ -42,7 +42,7 @@ Failed audits retry up to 3 times with traceback injection.
 - **Cross-Model Adversarial Auditing** — Sonnet writes code, Opus reviews it before delivery. Different model families catch different failure modes. Every output is gated.
 - **Project Registry** — Register your local projects in `projects.yaml`. Say "run the job scraper" in Telegram and the agent matches triggers, runs commands in the right directory, and auto-manages a shared project venv for dependencies.
 - **7 Task Types** — Code generation, data analysis, research, project operations, file processing, creative writing, general Q&A. Each with tailored system prompts and audit criteria.
-- **Full System Access (with guardrails)** — Shell access, internet, pip install, Ollama, big data, frontend generation. Hardened with a 34-pattern command blocklist, code scanner, Docker isolation, credential stripping, budget enforcement, and the Opus audit gate.
+- **Full System Access (with guardrails)** — Shell access, internet, pip install, Ollama, big data, frontend generation. Hardened with a 39-pattern command blocklist, code scanner, Docker isolation, credential stripping, budget enforcement, and the Opus audit gate.
 - **Schedule & Forget** — APScheduler with SQLite persistence. Schedule recurring tasks from Telegram with `/schedule 1440 Daily briefing`. Jobs survive reboots.
 - **Cross-Task Memory** — Project tasks store success/failure patterns in a SQLite memory table. The planner injects "lessons learned" from previous runs, preventing repeated failures.
 - **Model Routing** — Low-complexity tasks auto-route to local Ollama when available and RAM allows. Budget escalation kicks in at 70% of daily spend. Audit always stays on Opus.
@@ -186,7 +186,7 @@ AgentSutra/
 │   └── projects.py          # YAML project registry loader
 ├── storage/db.py            # SQLite with WAL mode
 ├── scheduler/cron.py        # APScheduler with SQLite persistence
-├── tests/                   # 383+ tests across 17 files
+├── tests/                   # 527+ tests across 18 files
 ├── projects.yaml            # Your registered projects
 └── .env.example             # Configuration template
 ```
@@ -235,7 +235,7 @@ AgentSutra gives an LLM direct access to your machine. The security model is **d
 | Layer | What It Does |
 |-------|-------------|
 | **Authentication** | Telegram user ID allowlist. Unauthorized users silently ignored. |
-| **Command Blocklist** | 38 regex patterns block `rm -rf /`, `sudo`, `curl\|sh`, `chmod 777`, etc. |
+| **Command Blocklist** | 39 regex patterns block `rm -rf /`, `sudo`, `curl\|sh`, `chmod 777`, `cat\|bash`, etc. |
 | **Code Scanner** | Scans generated Python for credential reads, dangerous syscalls, home destruction. |
 | **Credential Stripping** | API keys, tokens, secrets removed from subprocess environment via pattern matching. |
 | **Docker Isolation** | Optional hard filesystem boundary. Only `workspace/` is mounted read-write. |
@@ -283,6 +283,7 @@ All configuration is via `.env`. See `.env.example` for the full template.
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama API endpoint |
 | `OLLAMA_DEFAULT_MODEL` | `llama3.1:8b` | Default Ollama model |
 | `BIG_DATA_ROW_THRESHOLD` | `500` | Rows before switching to chunked processing |
+| `MAX_FILE_INJECT_COUNT` | `50` | Max project source files before skipping injection |
 
 </details>
 
@@ -335,14 +336,14 @@ Run `source venv/bin/activate && pip install -r requirements.txt`. Requires Pyth
 
 ## Tests
 
-383+ tests across 17 files — unit, integration, handler, and end-to-end:
+527+ tests across 18 files — unit, integration, handler, adversarial stress, and end-to-end:
 
 ```bash
 python3 -m pytest tests/ -v                                  # All tests
 python3 -m pytest tests/ -v -k "not requires_sandbox_image"  # Without Docker
 ```
 
-Coverage: sandbox (174), executor (34), Docker (28), handlers (27), auditor (22), v8 foundation (17), v8 context (13), budget (13), v8 routing (12), file manager (12), v8 ux (11), e2e artifact delivery (8), database (8), classifier (5), Claude client (4), pipeline integration (5).
+Coverage: sandbox (174), stress v8 audit 2 (80), stress v8 (64), executor (34), Docker (28), handlers (27), auditor (22), v8 foundation (17), v8 context (13), budget (13), v8 routing (12), file manager (12), v8 ux (11), e2e artifact delivery (8), database (8), classifier (5), pipeline integration (5), Claude client (4).
 
 ---
 

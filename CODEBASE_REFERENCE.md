@@ -34,11 +34,11 @@ AgentSutra is a self-hosted Telegram bot that receives natural language tasks, p
 
 **Key numbers (v8.0.0):**
 - ~5,000 lines of application code across 16 source files
-- ~4,500 lines of test code across 17 test files
-- 383 automated tests (373 pass, 10 skip — Docker required)
+- ~6,500 lines of test code across 18 test files
+- 527 automated tests (527 pass, 11 skip — Docker required)
 - 13 Telegram commands
 - 7 task types
-- 38 blocked command patterns (Tier 1 security)
+- 39 blocked command patterns (Tier 1 security)
 - 5-stage pipeline with cross-model auditing (Sonnet writes, Opus reviews)
 
 ---
@@ -86,6 +86,7 @@ AgentSutra is a self-hosted Telegram bot that receives natural language tasks, p
 | `MONTHLY_BUDGET_USD` | 0 (unlimited) | Monthly API spend cap |
 | `MAX_CONCURRENT_TASKS` | 3 | Parallel pipeline limit |
 | `RAM_THRESHOLD_PERCENT` | 90 | Reject tasks above this |
+| `MAX_FILE_INJECT_COUNT` | 50 | Max project source files for dynamic injection |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Local Ollama endpoint |
 | `OLLAMA_DEFAULT_MODEL` | `llama3.1:8b` | Default local model |
 
@@ -374,7 +375,7 @@ Package marker.
 **What it does:**
 - **Live output registry (v8):** Thread-safe dict holding per-task stdout lines. `get_live_output(task_id, tail=3)` returns the last N lines for Telegram streaming. Bounded to 50 lines per task.
 - **Tiered command safety:**
-  - Tier 1 (`_BLOCKED_PATTERNS`, 38 patterns): Always blocked. `rm -rf /`, `sudo`, `curl|sh`, `chmod 777`, `mkfs`, fork bombs, etc.
+  - Tier 1 (`_BLOCKED_PATTERNS`, 39 patterns): Always blocked. `rm -rf /`, `sudo`, `curl|sh`, `chmod 777`, `mkfs`, `cat|bash`, fork bombs, etc.
   - Tier 3 (`_LOGGED_PATTERNS`, 12 patterns): Allowed but logged. `rm`, `chmod`, `git push`, `curl`, `python3 -c`, etc.
   - Tier 4 (`_CODE_BLOCKED_PATTERNS`, 8 patterns): Scans Python code content for credential reads, `os.system()`, `shutil.rmtree(/)`, reverse shells.
 - **Credential stripping:** `_filter_env()` removes API keys, tokens, secrets from subprocess environment via exact match and substring matching
@@ -483,7 +484,7 @@ Package marker.
 
 ## tests/ — Test Suite
 
-383 tests across 17 files. 373 pass, 10 skip (require Docker Desktop).
+527 tests across 18 files. 527 pass, 11 skip (require Docker Desktop).
 
 ### Existing test files (pre-v8):
 
@@ -510,6 +511,8 @@ Package marker.
 | `test_v8_context.py` | 13 | Project memory DB operations (4), deliverer memory extraction (3), planner memory injection (2), dynamic file injection (4) |
 | `test_v8_routing.py` | 12 | Model router selection (8), route-and-call integration (1), temporal sequence mining (3) |
 | `test_v8_ux.py` | 11 | Live output registry (4), hash-gated edits (3), debug sidecar (2), stage timing collection (2) |
+| `test_stress_v8.py` | 64 | Adversarial stress round 1: code scanner evasion (15), shell blocklist evasion (10), path traversal (6), concurrency/deadlock (2), output registry (3), privacy (2), memory poisoning (3), dedup/redundancy (3), magic numbers (4), Ollama fallback (3), routing invariants (5), budget escalation (4), edge cases (4) |
+| `test_stress_v8_audit2.py` | 80 | Adversarial stress round 2: 81 tests across expanded security boundary, concurrency contention, logic saturation, and resource routing scenarios |
 
 **Why so many sandbox tests:** The sandbox is the most security-critical module. Every blocked pattern has a test. Every allowed pattern has a test. Every edge case (split flags, long flags, mixed case) is covered. This prevents regressions when adding new patterns.
 
@@ -607,9 +610,6 @@ workspace/
 
 ### `CODEBASE_REFERENCE.md` (this file)
 **Purpose:** Complete inventory of every file, folder, and configuration with rationale.
-
-### `agentsutra_prompt.md` (448 lines, 21 KB)
-**Purpose:** Original build prompt and AI assistant context. Contains the instructions used to build and iterate on the codebase.
 
 ---
 

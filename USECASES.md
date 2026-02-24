@@ -1,8 +1,8 @@
-# AgentSutra v6.11 — Complete Capabilities & Usage Guide
+# AgentSutra v8.0.0 — Complete Capabilities & Usage Guide
 
 **Status: GOD MODE ACHIEVED**
 
-AgentSutra is a fully autonomous AI agent system controlled via Telegram, running on Mac Mini M2. It combines Claude Sonnet 4.6 (generation) + Claude Opus 4.6 (adversarial auditing) with unrestricted shell access, full internet, local AI orchestration, big data processing, and production frontend generation — all from your phone. Hardened with budget enforcement, RAM guards, rate limiting, 34-pattern command blocklist, code content scanner, pattern-based credential filtering, parameter injection prevention, optional Docker container isolation for code execution, process group kill on timeout, fail-safe audit defaults, pipeline-level timeouts, error sanitization, environment error detection, project dependency bootstrapping, and 336 automated tests.
+AgentSutra is a fully autonomous AI agent system controlled via Telegram, running on Mac Mini M2. It combines Claude Sonnet 4.6 (generation) + Claude Opus 4.6 (adversarial auditing) with unrestricted shell access, full internet, local AI orchestration, big data processing, and production frontend generation — all from your phone. Hardened with budget enforcement, RAM guards, rate limiting, 39-pattern command blocklist, code content scanner, pattern-based credential filtering, parameter injection prevention, optional Docker container isolation for code execution, process group kill on timeout, fail-safe audit defaults, pipeline-level timeouts, error sanitization, environment error detection, project dependency bootstrapping, and 527 automated tests.
 
 ---
 
@@ -44,12 +44,12 @@ God Mode = the agent has the same power level as you sitting at the terminal, bu
 | Rate limiting | YES | 5-second per-user cooldown between task submissions |
 | Storage auto-cleanup | YES | Prunes old data (30d/90d) and workspace files (7d) on startup |
 | Monthly maintenance cron | YES | SQLite VACUUM, pip-cache cleanup, Docker prune — launchd scheduled |
-| 336 automated tests | YES | Unit + integration + handler + e2e artifact delivery tests with mocked pipeline |
+| 527 automated tests | YES | Unit + integration + handler + adversarial stress + e2e artifact delivery tests with mocked pipeline |
 | Docker container isolation | YES | Optional: isolates run_code() in disposable containers, host filesystem inaccessible |
 | Docker network isolation | YES | `DOCKER_NETWORK=none` for airgapped execution of sensitive data tasks |
 
 **What's NOT unlocked (by design):**
-- 34 catastrophic command patterns (rm -rf, mkfs, sudo, curl|sh, wget|bash, chmod 777, python -c, find -delete, base64|bash, mv ~/, printf|sh, eval, bash -c string splitting, dotfile writes, symlink attacks, etc.) — always blocked
+- 39 catastrophic command patterns (rm -rf, mkfs, sudo, curl|sh, wget|bash, chmod 777, python -c, find -delete, base64|bash, mv ~/, printf|sh, eval, bash -c string splitting, dotfile writes, symlink attacks, cat|bash, etc.) — always blocked
 - All credentials stripped from subprocess env (exact-match keys + pattern-based: KEY, TOKEN, SECRET, PASSWORD, CREDENTIAL)
 - Docker isolation (optional): code execution in containers with only workspace dirs mounted — host filesystem, SSH keys, `.env` completely inaccessible
 - Files outside HOME directory — boundary check enforced
@@ -631,7 +631,7 @@ The job survives bot restarts via APScheduler SQLite persistence.
       |
  [Telegram Bot API]
       |
- [AgentSutra v6.11 on Mac Mini M2]
+ [AgentSutra v8.0.0 on Mac Mini M2]
       |
  classify ──> plan ──> execute ──> audit ──> deliver
  (Sonnet)    (Sonnet)  (Sonnet)   (Opus)    (Sonnet)
@@ -651,4 +651,4 @@ The job survives bot restarts via APScheduler SQLite persistence.
          Internet | Ollama | ~/ filesystem | Any shell command
 ```
 
-**336 tests (326 passed + 10 skipped). 10 skipped tests require Docker Desktop. Zero known bugs. Production-ready.**
+**527 tests (527 passed + 11 skipped). 11 skipped tests require Docker Desktop. Zero known bugs. Production-ready.**

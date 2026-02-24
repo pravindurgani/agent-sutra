@@ -1,6 +1,6 @@
 # AgentSutra v8.0.0 - Complete Project Documentation
 
-A Telegram-driven AI agent server running on Mac Mini M2 (16GB). Receives tasks via Telegram, processes them through a LangGraph Plan-Execute-Audit pipeline powered by Claude API, and delivers results back. Features: project registry with shared auto-managed venv, cross-model adversarial auditing (Sonnet+Opus), full internet access, local AI orchestration (Ollama), big data processing, production frontend generation, Docker container isolation for code execution, 7 task types, 13 commands, budget enforcement, RAM guards, code content scanner, 38-pattern command blocklist, environment error detection, project dependency bootstrapping, streaming for extended thinking, honest failure delivery, and 383+ automated tests.
+A Telegram-driven AI agent server running on Mac Mini M2 (16GB). Receives tasks via Telegram, processes them through a LangGraph Plan-Execute-Audit pipeline powered by Claude API, and delivers results back. Features: project registry with shared auto-managed venv, cross-model adversarial auditing (Sonnet+Opus), full internet access, local AI orchestration (Ollama), big data processing, production frontend generation, Docker container isolation for code execution, 7 task types, 13 commands, budget enforcement, RAM guards, code content scanner, 39-pattern command blocklist, environment error detection, project dependency bootstrapping, streaming for extended thinking, honest failure delivery, and 527+ automated tests.
 
 **Last updated:** 2026-02-24
 
@@ -165,7 +165,7 @@ AgentSutra/
 |   |-- __init__.py
 |   +-- cron.py                 # APScheduler with SQLite-backed job store
 |
-|-- tests/                      # 383+ automated tests (v6.2+)
+|-- tests/                      # 527+ automated tests (v6.2+)
 |   |-- __init__.py
 |   |-- test_sandbox.py         # 174 tests: blocked patterns (30), allowed cmds (13), working dir (4), pip mapping (6), import parsing (7), interpreter blocking (7), find blocking (5), encoding bypass (3), home move blocking (4), dotfile protection (9), env filtering (6), traceback extraction (4), pipe-to-shell (6), eval (2), bash string splitting (4), code scanner (14), file detection (6), artifact filter (26), walk artifacts (6), artifact sanity check (3), stdout fallback (7), stdin devnull (2)
 |   |-- test_executor.py        # 34 tests: markdown extraction (10), timeout estimation (4), param extraction (4), import error parsing (12), dependency bootstrapping (4)
@@ -890,6 +890,7 @@ All variables are set in `.env` and loaded by `config.py` at import time.
 | `DOCKER_MEMORY_LIMIT` | `2g` | No | Max memory per container, Docker format (v6.4) |
 | `DOCKER_CPU_LIMIT` | `2` | No | Max CPU cores per container (v6.4) |
 | `DOCKER_NETWORK` | `bridge` | No | Container network mode: `bridge` (full) or `none` (airgapped) (v6.4) |
+| `MAX_FILE_INJECT_COUNT` | `50` | No | Max project source files before skipping dynamic file injection (v8.0) |
 
 ### Derived Constants (not configurable via .env)
 
@@ -1581,6 +1582,29 @@ AgentSutra was independently stress-tested using a 4-category evaluation protoco
 
 ## Changelog
 
+### v8.0.1 - 2026-02-24 - Adversarial Stress Testing & Security Hardening
+
+Two rounds of adversarial stress testing with 144 new tests. Identified and patched 8 vulnerabilities.
+
+**Audit Round 1 patches (commit 27fbc95):**
+- `tools/sandbox.py`: Added `re.MULTILINE` flag to `_BLOCKED_RE` compilation — without it, `$` only matches end-of-entire-string, making multiline heredoc payloads invisible to the blocklist
+- `tools/sandbox.py`: Fixed rm tilde pattern to handle quoted paths: `['\"]?` suffix on `~` match
+- `brain/nodes/deliverer.py`: Sanitize `Path.home()` from debug sidecar message field to prevent home path leakage
+- `bot/handlers.py`: Context manager for chain artifact document sending (fixes file handle leak)
+- `tools/model_router.py`: Empty Ollama response (`{"response": ""}`) now triggers Claude fallback instead of returning empty string
+
+**Audit Round 2 patches (commit 08f5127):**
+- `tools/sandbox.py`: Added `cat|bash` pattern (39 total blocked patterns) — catches `cat file | bash` pipe-to-interpreter attacks
+- `tools/model_router.py`: Budget escalation now checks `_ram_below_threshold(90)` before routing to Ollama under memory pressure
+- `config.py`: Extracted `MAX_FILE_INJECT_COUNT = 50` from hardcoded magic number in planner.py
+- `brain/nodes/planner.py`: References `config.MAX_FILE_INJECT_COUNT` instead of hardcoded `> 50`
+
+**New test files:**
+- `tests/test_stress_v8.py` — 64 adversarial tests (audit round 1): code scanner evasion, shell blocklist evasion, path traversal, concurrency/deadlock, output registry thread safety, privacy, memory poisoning, routing invariants, budget escalation
+- `tests/test_stress_v8_audit2.py` — 80 adversarial tests (audit round 2): expanded security boundary, concurrency contention, logic saturation, resource routing
+
+**Test suite:** 527 tests (527 passed + 11 skipped). 11 skipped require Docker Desktop.
+
 ### v8.0.0 - 2026-02-24 - Context Memory, Model Routing, Chaining, Live Streaming
 
 Major feature release implementing the v8 roadmap across 4 phases. Adds cross-task project memory, intelligent model routing (Claude/Ollama), strict-AND task chaining, live stdout streaming, and per-task debug sidecars.
@@ -1599,7 +1623,7 @@ Major feature release implementing the v8 roadmap across 4 phases. Adds cross-ta
 
 **Phase 3: Intelligence & Routing**
 - New `tools/model_router.py` with `route_and_call()` — routes to Claude or Ollama based on purpose, complexity, RAM, and daily budget
-- Routing rules: audit → always Opus, code_gen → always Sonnet, low-complexity classify/plan → Ollama if available + RAM < 75%, budget escalation at 70% of DAILY_BUDGET_USD
+- Routing rules: audit → always Opus, code_gen → always Sonnet, low-complexity classify/plan → Ollama if available + RAM < 75%, budget escalation at 70% of DAILY_BUDGET_USD (with RAM < 90% guard)
 - Wired into classifier.py (classify→low) and planner.py (project→low). Auditor and executor unchanged.
 - Ollama fallback: if Ollama call fails, transparently falls back to Claude Sonnet
 - Temporal sequence mining in deliverer: `_suggest_next_step()` queries task history for follow-up patterns (2+ occurrences within 30 min window)
@@ -1633,7 +1657,7 @@ Major feature release implementing the v8 roadmap across 4 phases. Adds cross-ta
 - `bot/telegram_bot.py` — Registered `chain` + `debug` commands (13 total)
 - `config.py` — Version bump to 8.0.0
 
-**Test suite:** 383 tests (373 passed + 10 skipped). 10 skipped tests require Docker Desktop. 53 new tests across 4 test files.
+**Test suite:** 527 tests (527 passed + 11 skipped). 11 skipped tests require Docker Desktop. 53 new v8 tests across 4 test files, plus 144 adversarial stress tests across 2 audit rounds.
 
 ### v7.0.0 - 2026-02-22 - Shared Project Venv, Streaming, Honest Delivery
 

@@ -5,6 +5,7 @@ import logging
 
 from brain.state import AgentState
 from tools import claude_client
+from tools.model_router import route_and_call
 from tools.projects import match_project, get_all_projects_summary
 
 logger = logging.getLogger(__name__)
@@ -55,7 +56,11 @@ def classify(state: AgentState) -> dict:
     if state.get("files"):
         prompt += "\n\nAttached files:\n" + "\n".join(f"- {f}" for f in state["files"])
 
-    response = claude_client.call(prompt, system=system, max_tokens=200)
+    response = route_and_call(
+        prompt, system=system,
+        purpose="classify", complexity="low",
+        max_tokens=200,
+    )
 
     try:
         parsed = json.loads(response)

@@ -121,6 +121,12 @@ Files generated: {', '.join(Path(f).name for f in artifacts if Path(f).exists())
     except Exception as e:
         logger.warning("Failed to store project memory: %s", e)
 
+    # Suggest next step based on historical task sequences
+    if verdict == "pass" and task_type == "project" and state.get("project_name"):
+        suggestion = _suggest_next_step(state["project_name"], state["user_id"])
+        if suggestion:
+            summary += f"\n\n{suggestion}"
+
     return {"final_response": summary, "artifacts": artifacts}
 
 
@@ -144,6 +150,52 @@ def _extract_and_store_memory(state: AgentState) -> None:
         feedback = state.get("audit_feedback", "")[:300]
         content = f"Task: {state['message'][:200]}. Failed: {feedback}"
         sync_write_project_memory(project_name, "failure_pattern", content, task_id)
+
+
+def _suggest_next_step(project_name: str, user_id: int) -> str | None:
+    """Infer the most common follow-up task from historical sequences.
+
+    Queries the tasks table for completed project tasks that followed
+    the current project within 30 minutes. If the same follow-up has
+    occurred 2+ times, suggest it.
+
+    NOTE: This will return None until project_memory has accumulated
+    2+ weeks of real task data. That's expected.
+    """
+    import sqlite3
+
+    query = """
+        SELECT t2.message, COUNT(*) as frequency
+        FROM tasks t1
+        JOIN tasks t2 ON t2.user_id = t1.user_id
+            AND t2.created_at > t1.completed_at
+            AND julianday(t2.created_at) - julianday(t1.completed_at) < 0.0208
+            AND t2.task_type = 'project'
+            AND t2.status = 'completed'
+        WHERE t1.user_id = ?
+            AND t1.task_type = 'project'
+            AND t1.message LIKE ?
+            AND t1.status = 'completed'
+        GROUP BY t2.message
+        HAVING COUNT(*) >= 2
+        ORDER BY frequency DESC
+        LIMIT 1
+    """
+
+    try:
+        import config as _cfg
+        conn = sqlite3.connect(str(_cfg.DB_PATH), timeout=20.0)
+        try:
+            cursor = conn.execute(query, (user_id, f"%{project_name}%"))
+            row = cursor.fetchone()
+            if row:
+                return f"Suggested next step: You usually run \"{row[0][:100]}\" after this. (seen {row[1]} times)"
+            return None
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("Temporal inference failed: %s", e)
+        return None
 
 
 def _extract_output(execution_result: str) -> str:

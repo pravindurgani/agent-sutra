@@ -6,6 +6,7 @@ from pathlib import Path
 import config
 from brain.state import AgentState
 from tools import claude_client
+from tools.model_router import route_and_call
 from tools.file_manager import get_file_content, format_file_metadata_for_prompt
 from tools.projects import get_project_context
 from storage.db import sync_query_project_memories
@@ -252,7 +253,13 @@ def plan(state: AgentState) -> dict:
 
     # Enable thinking only for tasks that genuinely benefit from deep reasoning
     use_thinking = task_type in ("frontend", "ui_design")
-    response = claude_client.call(prompt, system=system, max_tokens=3000, thinking=use_thinking)
+    # Route through model router — project tasks are low complexity (known commands)
+    plan_complexity = "low" if task_type == "project" else "high"
+    response = route_and_call(
+        prompt, system=system,
+        purpose="plan", complexity=plan_complexity,
+        max_tokens=3000, thinking=use_thinking,
+    )
     logger.info("Plan created for task %s (type=%s, %d chars, thinking=%s)", state["task_id"], task_type, len(response), use_thinking)
     return {"plan": response}
 

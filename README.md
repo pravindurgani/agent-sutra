@@ -11,6 +11,17 @@ A self-hosted Telegram bot that classifies your task, writes code, executes it i
 
 ---
 
+### What's in a Name?
+
+**Sutra** (Sanskrit: सूत्र, *sūtra*) literally translates to **"thread"** or **"string"**. In ancient literature, it refers to a concise rule or aphorism that weaves together vast volumes of knowledge into a cohesive, manageable structure.
+
+**AgentSutra** embodies this philosophy by:
+- **The Thread of Context** — Maintaining a continuous "thread" of memory and awareness across your local project codebases.
+- **The Rule of Reliability** — Executing through a fixed, disciplined 5-stage pipeline — prioritizing predictable results over chaotic autonomy.
+- **A Pithy Powerhouse** — Providing a lean, high-context tool that runs on your local machine to master complex developmental tasks.
+
+---
+
 ## What This Is (and Isn't)
 
 **This is:** A working personal AI agent — cross-model auditing, project orchestration, defense-in-depth security, budget enforcement, scheduled tasks, and 527+ tests. Running real daily workflows since February 2026.

@@ -1,8 +1,8 @@
-# AgentSutra v7.0.0 - Complete Project Documentation
+# AgentSutra v8.0.0 - Complete Project Documentation
 
-A Telegram-driven AI agent server running on Mac Mini M2 (16GB). Receives tasks via Telegram, processes them through a LangGraph Plan-Execute-Audit pipeline powered by Claude API, and delivers results back. Features: project registry with shared auto-managed venv, cross-model adversarial auditing (Sonnet+Opus), full internet access, local AI orchestration (Ollama), big data processing, production frontend generation, Docker container isolation for code execution, 7 task types, 11 commands, budget enforcement, RAM guards, code content scanner, 34-pattern command blocklist, environment error detection, project dependency bootstrapping, streaming for extended thinking, honest failure delivery, and 330+ automated tests.
+A Telegram-driven AI agent server running on Mac Mini M2 (16GB). Receives tasks via Telegram, processes them through a LangGraph Plan-Execute-Audit pipeline powered by Claude API, and delivers results back. Features: project registry with shared auto-managed venv, cross-model adversarial auditing (Sonnet+Opus), full internet access, local AI orchestration (Ollama), big data processing, production frontend generation, Docker container isolation for code execution, 7 task types, 13 commands, budget enforcement, RAM guards, code content scanner, 38-pattern command blocklist, environment error detection, project dependency bootstrapping, streaming for extended thinking, honest failure delivery, and 383+ automated tests.
 
-**Last updated:** 2026-02-22
+**Last updated:** 2026-02-24
 
 ---
 
@@ -69,7 +69,7 @@ Every architectural decision in this codebase was made through the lens of: **"W
          |
     [Telegram Bot API]
          |
-    [bot/telegram_bot.py]        Entry point: 11 commands, file handlers
+    [bot/telegram_bot.py]        Entry point: 13 commands, file handlers
          |
     [bot/handlers.py]            Auth, streaming status, file routing
          |                            |
@@ -133,12 +133,12 @@ AgentSutra/
 |
 |-- bot/                        # Telegram bot layer
 |   |-- __init__.py
-|   |-- telegram_bot.py         # Bot application setup, 11 command handlers + 3 message handlers
-|   +-- handlers.py             # 11 command handlers + 3 message handlers, resource guards, streaming status
+|   |-- telegram_bot.py         # Bot application setup, 13 command handlers + 3 message handlers
+|   +-- handlers.py             # 13 command handlers + 3 message handlers, resource guards, streaming status
 |
 |-- brain/                      # LangGraph agent pipeline
 |   |-- __init__.py
-|   |-- state.py                # AgentState TypedDict (20 fields)
+|   |-- state.py                # AgentState TypedDict (21 fields)
 |   |-- graph.py                # StateGraph wiring, stage tracking, run_task()
 |   +-- nodes/                  # Individual pipeline stages
 |       |-- __init__.py
@@ -153,7 +153,8 @@ AgentSutra/
 |   |-- claude_client.py        # Anthropic SDK wrapper with retry, usage tracking
 |   |-- sandbox.py              # Subprocess execution: run_code() + run_shell()
 |   |-- file_manager.py         # File I/O, uploads, workspace management
-|   +-- projects.py             # Project registry loader, trigger matcher
+|   |-- projects.py             # Project registry loader, trigger matcher
+|   +-- model_router.py        # Claude/Ollama routing with budget escalation
 |
 |-- storage/                    # Persistence layer
 |   |-- __init__.py
@@ -164,7 +165,7 @@ AgentSutra/
 |   |-- __init__.py
 |   +-- cron.py                 # APScheduler with SQLite-backed job store
 |
-|-- tests/                      # 330+ automated tests (v6.2+)
+|-- tests/                      # 383+ automated tests (v6.2+)
 |   |-- __init__.py
 |   |-- test_sandbox.py         # 174 tests: blocked patterns (30), allowed cmds (13), working dir (4), pip mapping (6), import parsing (7), interpreter blocking (7), find blocking (5), encoding bypass (3), home move blocking (4), dotfile protection (9), env filtering (6), traceback extraction (4), pipe-to-shell (6), eval (2), bash string splitting (4), code scanner (14), file detection (6), artifact filter (26), walk artifacts (6), artifact sanity check (3), stdout fallback (7), stdin devnull (2)
 |   |-- test_executor.py        # 34 tests: markdown extraction (10), timeout estimation (4), param extraction (4), import error parsing (12), dependency bootstrapping (4)
@@ -176,7 +177,11 @@ AgentSutra/
 |   |-- test_db.py              # 8 tests: prune_old_data epoch handling (3), crash recovery (3), task pruning (2)
 |   |-- test_e2e_artifact_delivery.py  # 8 tests: realistic project execution with artifact detection
 |   |-- test_classifier.py      # 5 tests: fallback ordering (imports _FALLBACK_ORDER from source)
-|   +-- test_pipeline_integration.py  # 5 tests: full pipeline with mocked Claude API
+|   |-- test_pipeline_integration.py  # 5 tests: full pipeline with mocked Claude API
+|   |-- test_v8_foundation.py  # 17 tests: timeout detection (7), blocklist audit (6), coding standards injection (4)
+|   |-- test_v8_context.py     # 13 tests: project memory DB (4), deliverer memory extraction (3), planner memory injection (2), dynamic file injection (4)
+|   |-- test_v8_routing.py     # 12 tests: model router selection (8), route-and-call (1), temporal sequence mining (3)
+|   +-- test_v8_ux.py          # 11 tests: live output registry (4), hash-gated edits (3), debug sidecar (2), stage timing (2)
 |
 |-- scripts/                    # Utility scripts
 |   |-- secure_deploy.sh        # Deployment hardening script
@@ -351,6 +356,15 @@ AgentSutra/
 - `match_project()`: iterates all projects' trigger keywords (case-insensitive substring match), scores by trigger length (longer = more specific), returns best match or `None`
 - `get_project_context()`: formats a project's full info as text for Claude prompts -- includes name, path, description, available commands, requires_file flag, and timeout
 - `get_all_projects_summary()`: one-line summary of each project with first 3 triggers, used in classifier's system prompt
+
+### `tools/model_router.py` - Model Router (v8.0.0)
+- Routes LLM calls to Claude or Ollama based on purpose, complexity, RAM availability, and daily budget
+- `route_and_call()` is the main entry point — drop-in replacement for `claude_client.call()` with routing intelligence
+- Routing rules: audit → always Opus, code_gen → always Sonnet, low-complexity classify/plan → Ollama if available
+- Budget escalation: if daily spend exceeds 70% of `DAILY_BUDGET_USD`, routes classify/plan to Ollama regardless of complexity
+- `_get_today_spend()` queries `api_usage` table for today's total cost (UTC midnight cutoff)
+- Ollama fallback: if Ollama call fails, transparently falls back to Claude Sonnet with a warning log
+- `_ollama_available()` checks Ollama API with 2-second timeout; `_ram_below_threshold()` uses psutil
 
 ### `tools/file_manager.py` - File Operations
 - `save_upload()`: validates against `MAX_FILE_SIZE_BYTES`, saves bytes to uploads dir with UUID-based unique filenames (`{stem}_{uuid4_hex8}{suffix}`) to prevent TOCTOU race conditions (v6.7)
@@ -1566,6 +1580,60 @@ AgentSutra was independently stress-tested using a 4-category evaluation protoco
 ---
 
 ## Changelog
+
+### v8.0.0 - 2026-02-24 - Context Memory, Model Routing, Chaining, Live Streaming
+
+Major feature release implementing the v8 roadmap across 4 phases. Adds cross-task project memory, intelligent model routing (Claude/Ollama), strict-AND task chaining, live stdout streaming, and per-task debug sidecars.
+
+**Phase 1: Foundation & Quick Wins**
+- 3 timeout patterns added to `_ENV_ERROR_PATTERNS` in auditor.py — catches both `run_shell` ("Timed out after") and `run_code` ("Execution timed out after") formats, plus "killed process group"
+- Coding standards injection: planner reads `.agentsutra/standards.md` and injects into system prompt for code-generating task types (not project tasks). Truncated at 2000 chars.
+- Security blocklist audit: verified all 4 roadmap-identified gaps already covered (3 from Round 4 hardening, 1 deliberately Tier 3). Added documentation tests.
+
+**Phase 2: Context & Memory Layer**
+- New `project_memory` table in SQLite with `UNIQUE(project_name, memory_type, content)` constraint and `INSERT OR IGNORE` semantics
+- Synchronous read/write helpers (`sync_write_project_memory`, `sync_query_project_memories`) using `threading.Lock` — pipeline nodes run in `asyncio.to_thread()` and cannot use aiosqlite
+- Deliverer extracts success/failure patterns after each project task and persists to `project_memory`
+- Planner injects "LESSONS LEARNED" from previous runs into system prompt for project tasks
+- Dynamic file injection: extra Sonnet call (~$0.02) selects 3-5 relevant files from project tree (50-file cap, 3000 chars/file) and injects into planner context
+
+**Phase 3: Intelligence & Routing**
+- New `tools/model_router.py` with `route_and_call()` — routes to Claude or Ollama based on purpose, complexity, RAM, and daily budget
+- Routing rules: audit → always Opus, code_gen → always Sonnet, low-complexity classify/plan → Ollama if available + RAM < 75%, budget escalation at 70% of DAILY_BUDGET_USD
+- Wired into classifier.py (classify→low) and planner.py (project→low). Auditor and executor unchanged.
+- Ollama fallback: if Ollama call fails, transparently falls back to Claude Sonnet
+- Temporal sequence mining in deliverer: `_suggest_next_step()` queries task history for follow-up patterns (2+ occurrences within 30 min window)
+
+**Phase 4: UX & Orchestration**
+- Live stdout streaming: refactored `run_code()` and `run_shell()` from `proc.communicate()` to threaded Popen reading with per-task live output registry (bounded to 50 lines)
+- Hash-gated Telegram edits: status polling uses `hash(label)` comparison instead of stage string — handles both stage changes and stdout updates without redundant API calls
+- Strict-AND task chaining: `/chain step 1 -> step 2 -> step 3` with `{output}` artifact passing. Each step runs the full 5-stage pipeline. Failed step halts the chain with clear error message.
+- Debug JSON sidecar: `_write_debug_sidecar()` writes per-task `.debug.json` with stage timings, verdict, retry count. Accessible via `/debug <task_id>` command.
+- `stage_timings` field added to `AgentState`, collected by `_wrap_node()` in graph.py
+
+**New files:**
+- `tools/model_router.py` — Claude/Ollama routing layer
+- `.agentsutra/standards.md` — Python/Shell coding standards for planner injection
+- `tests/test_v8_foundation.py` — 17 tests (Phase 1)
+- `tests/test_v8_context.py` — 13 tests (Phase 2)
+- `tests/test_v8_routing.py` — 12 tests (Phase 3)
+- `tests/test_v8_ux.py` — 11 tests (Phase 4)
+
+**Modified files:**
+- `brain/nodes/auditor.py` — 3 timeout patterns in `_ENV_ERROR_PATTERNS`
+- `brain/nodes/planner.py` — Standards injection, memory injection, dynamic file injection, model router wiring
+- `brain/nodes/classifier.py` — Model router wiring (`route_and_call` replaces `claude_client.call`)
+- `brain/nodes/deliverer.py` — Memory extraction, temporal mining, debug sidecar
+- `brain/nodes/executor.py` — `task_id` threading for live output
+- `brain/state.py` — `stage_timings: list[dict]` field
+- `brain/graph.py` — Timing collection in `_wrap_node`, `stage_timings` in initial state
+- `storage/db.py` — `project_memory` table, `idx_projmem_name` index, sync r/w helpers with `_sync_db_lock`
+- `tools/sandbox.py` — Live output registry, threaded Popen refactor, `task_id` parameter on run_code/run_shell
+- `bot/handlers.py` — Hash-gated edits, live stdout, `/chain` command, `/debug` command
+- `bot/telegram_bot.py` — Registered `chain` + `debug` commands (13 total)
+- `config.py` — Version bump to 8.0.0
+
+**Test suite:** 383 tests (373 passed + 10 skipped). 10 skipped tests require Docker Desktop. 53 new tests across 4 test files.
 
 ### v7.0.0 - 2026-02-22 - Shared Project Venv, Streaming, Honest Delivery
 

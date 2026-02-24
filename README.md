@@ -1,19 +1,19 @@
 # AgentSutra
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-330%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-383%20passed-brightgreen.svg)]()
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Claude API](https://img.shields.io/badge/LLM-Claude%20Sonnet%20%2B%20Opus-blueviolet.svg)]()
 
 **A private, autonomous AI agent for your Mac that actually gets work done.**
 
-A self-hosted Telegram bot that classifies your task, writes code, executes it in a sandbox, audits the output with a *different* AI model, and delivers the result. All on your own hardware. ~9,000 lines of production Python, 330+ tests, 11 registered projects.
+A self-hosted Telegram bot that classifies your task, writes code, executes it in a sandbox, audits the output with a *different* AI model, and delivers the result. All on your own hardware. ~9,000 lines of production Python, 383+ tests, 13 commands, 11 registered projects.
 
 ---
 
 ## What This Is (and Isn't)
 
-**This is:** A working personal AI agent — cross-model auditing, project orchestration, defense-in-depth security, budget enforcement, scheduled tasks, and 330+ tests. Running real daily workflows since February 2026.
+**This is:** A working personal AI agent — cross-model auditing, project orchestration, defense-in-depth security, budget enforcement, scheduled tasks, and 383+ tests. Running real daily workflows since February 2026.
 
 **This isn't:** A framework, a library, or a SaaS product. Built for one user on one machine. Fork it, learn from the patterns, or adapt it.
 
@@ -44,6 +44,9 @@ Failed audits retry up to 3 times with traceback injection.
 - **7 Task Types** — Code generation, data analysis, research, project operations, file processing, creative writing, general Q&A. Each with tailored system prompts and audit criteria.
 - **Full System Access (with guardrails)** — Shell access, internet, pip install, Ollama, big data, frontend generation. Hardened with a 34-pattern command blocklist, code scanner, Docker isolation, credential stripping, budget enforcement, and the Opus audit gate.
 - **Schedule & Forget** — APScheduler with SQLite persistence. Schedule recurring tasks from Telegram with `/schedule 1440 Daily briefing`. Jobs survive reboots.
+- **Cross-Task Memory** — Project tasks store success/failure patterns in a SQLite memory table. The planner injects "lessons learned" from previous runs, preventing repeated failures.
+- **Model Routing** — Low-complexity tasks auto-route to local Ollama when available and RAM allows. Budget escalation kicks in at 70% of daily spend. Audit always stays on Opus.
+- **Task Chaining** — `/chain step 1 -> step 2 -> step 3` with strict-AND semantics. Each step runs the full pipeline. Failed step halts the chain. `{output}` passes artifacts between steps.
 
 ---
 
@@ -173,16 +176,17 @@ AgentSutra/
 │       ├── auditor.py       # Cross-model quality review
 │       └── deliverer.py     # Formats and sends results
 ├── bot/
-│   ├── telegram_bot.py      # Bot factory + command registration
+│   ├── telegram_bot.py      # Bot factory + 13 commands
 │   └── handlers.py          # 14 command handlers + auth
 ├── tools/
 │   ├── claude_client.py     # Anthropic API wrapper + cost tracking
 │   ├── sandbox.py           # Code execution (Docker + subprocess)
 │   ├── file_manager.py      # Upload/download with UUID dedup
+│   ├── model_router.py      # Ollama/Claude routing with budget escalation
 │   └── projects.py          # YAML project registry loader
 ├── storage/db.py            # SQLite with WAL mode
 ├── scheduler/cron.py        # APScheduler with SQLite persistence
-├── tests/                   # 330+ tests across 12 files
+├── tests/                   # 383+ tests across 17 files
 ├── projects.yaml            # Your registered projects
 └── .env.example             # Configuration template
 ```
@@ -194,6 +198,7 @@ AgentSutra/
 1. User sends a message or file to the Telegram bot
 2. Handler authenticates, streams stage updates (*Classifying... Planning... Executing...*)
 3. **Classify:** Project triggers checked first (free), Claude called only if no match
+3b. **Model Router:** Low-complexity classify/plan calls route to Ollama when available; audit always uses Opus
 4. **Plan + Execute:** Sonnet generates a plan, writes code, runs it in sandbox (Docker or subprocess)
 5. **Audit:** Opus reviews the output — on failure, retry loop feeds traceback back to the planner (max 3)
 6. **Deliver:** Formatted result + artifact files sent back via Telegram. Failed tasks are reported honestly — the deliverer never fabricates success
@@ -214,6 +219,8 @@ AgentSutra/
 | `/schedule <min> <task>` | Schedule recurring task (e.g., `/schedule 1440 Daily briefing`) |
 | `/model <name>` | Switch default model |
 | `/cancel` | Cancel running task |
+| `/chain <step1 -> step2 -> ...>` | Execute strict-AND task chain with artifact passing |
+| `/debug <task_id>` | Show per-task debug JSON (stage timings, verdict, retries) |
 
 Send any file (CSV, Excel, PDF, images) and the bot will process it with your instructions.
 
@@ -228,7 +235,7 @@ AgentSutra gives an LLM direct access to your machine. The security model is **d
 | Layer | What It Does |
 |-------|-------------|
 | **Authentication** | Telegram user ID allowlist. Unauthorized users silently ignored. |
-| **Command Blocklist** | 34 regex patterns block `rm -rf /`, `sudo`, `curl\|sh`, `chmod 777`, etc. |
+| **Command Blocklist** | 38 regex patterns block `rm -rf /`, `sudo`, `curl\|sh`, `chmod 777`, etc. |
 | **Code Scanner** | Scans generated Python for credential reads, dangerous syscalls, home destruction. |
 | **Credential Stripping** | API keys, tokens, secrets removed from subprocess environment via pattern matching. |
 | **Docker Isolation** | Optional hard filesystem boundary. Only `workspace/` is mounted read-write. |
@@ -328,14 +335,14 @@ Run `source venv/bin/activate && pip install -r requirements.txt`. Requires Pyth
 
 ## Tests
 
-330+ tests across 12 files — unit, integration, handler, and end-to-end:
+383+ tests across 17 files — unit, integration, handler, and end-to-end:
 
 ```bash
 python3 -m pytest tests/ -v                                  # All tests
 python3 -m pytest tests/ -v -k "not requires_sandbox_image"  # Without Docker
 ```
 
-Coverage: sandbox (174), executor (34), Docker (28), handlers (27), auditor (22), budget (13), file manager (12), e2e artifact delivery (8), database (8), classifier (5), Claude client (4), pipeline integration (5).
+Coverage: sandbox (174), executor (34), Docker (28), handlers (27), auditor (22), v8 foundation (17), v8 context (13), budget (13), v8 routing (12), file manager (12), v8 ux (11), e2e artifact delivery (8), database (8), classifier (5), Claude client (4), pipeline integration (5).
 
 ---
 

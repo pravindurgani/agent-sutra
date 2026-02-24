@@ -597,18 +597,33 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         running_tasks = context.user_data.setdefault("running_tasks", {})
         running_tasks[task_id] = task_future
 
-        # Stream status updates while pipeline runs
-        last_stage = ""
+        # Stream status updates while pipeline runs (hash-gated to avoid redundant edits)
+        last_edit_hash = 0
         while not task_future.done():
             await asyncio.sleep(3)
             stage = get_stage(task_id)
-            if stage and stage != last_stage:
-                label = STAGE_LABELS.get(stage, stage)
+            if not stage:
+                continue
+
+            label = STAGE_LABELS.get(stage, stage)
+
+            # Enrich with live stdout during execution
+            if stage == "executing":
+                from tools.sandbox import get_live_output
+                tail = get_live_output(task_id, tail=3)
+                if tail:
+                    label += f"\n\nLatest output:\n{tail[-200:]}"
+
+            label += f" (task {task_id[:8]})"
+
+            # Hash-gate: skip edit if content hasn't changed
+            content_hash = hash(label)
+            if content_hash != last_edit_hash:
                 try:
-                    await status_msg.edit_text(f"{label} (task {task_id[:8]})")
+                    await status_msg.edit_text(label)
+                    last_edit_hash = content_hash
                 except Exception:
-                    pass  # Message edit can fail if identical text
-                last_stage = stage
+                    pass  # "Message is not modified" or rate limit
 
         result = task_future.result()
 
@@ -750,6 +765,134 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Photo received. Send a text message describing what to do with it."
     )
+
+
+@auth_required
+async def cmd_chain(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Execute a strict-AND chain of tasks: /chain step 1 -> step 2 -> step 3."""
+    user_id = update.effective_user.id
+    raw = update.message.text.replace("/chain", "", 1).strip()
+
+    if not raw:
+        await update.message.reply_text(
+            "Usage: /chain step 1 -> step 2 -> step 3\n"
+            "Use {output} to pass artifacts between steps."
+        )
+        return
+
+    steps = [s.strip() for s in raw.split("->") if s.strip()]
+    if len(steps) < 2:
+        await update.message.reply_text("A chain needs at least 2 steps separated by ->")
+        return
+
+    base_id = str(uuid.uuid4())[:8]
+    previous_artifacts: list[str] = []
+
+    await update.message.reply_text(
+        f"Starting chain: {len(steps)} steps\n"
+        + "\n".join(f"  {i+1}. {s}" for i, s in enumerate(steps))
+    )
+
+    for i, step in enumerate(steps):
+        step_id = f"{base_id}-step{i}"
+
+        # Replace {output} with actual artifact paths from previous step
+        if previous_artifacts:
+            artifact_paths = ", ".join(previous_artifacts)
+            step_msg = step.replace("{output}", artifact_paths)
+        else:
+            step_msg = step.replace("{output}", "").strip()
+
+        files = list(previous_artifacts)
+
+        # DB lifecycle: track each step as its own task
+        await db.create_task(step_id, user_id, step_msg)
+        await update.message.reply_text(f"Step {i+1}/{len(steps)}: {step_msg[:100]}")
+
+        try:
+            await db.update_task(step_id, status="running")
+            conversation_ctx = await db.build_conversation_context(user_id, limit=6)
+            result = await asyncio.wait_for(
+                asyncio.to_thread(
+                    run_task,
+                    task_id=step_id,
+                    user_id=user_id,
+                    message=step_msg,
+                    files=files,
+                    conversation_context=conversation_ctx,
+                ),
+                timeout=config.LONG_TIMEOUT,
+            )
+
+            now = datetime.now(timezone.utc).isoformat()
+            await db.update_task(
+                step_id,
+                status="completed" if result.get("audit_verdict") == "pass" else "failed",
+                result=result.get("final_response", "")[:5000],
+                completed_at=now,
+            )
+        except asyncio.TimeoutError:
+            await db.update_task(step_id, status="failed", error="Pipeline timeout")
+            await update.message.reply_text(
+                f"Chain halted at step {i+1}/{len(steps)}: Pipeline timeout.\n"
+                f"Steps {i+2}-{len(steps)} were NOT executed."
+            )
+            return
+        except Exception as e:
+            await db.update_task(step_id, status="failed", error=str(e)[:500])
+            await update.message.reply_text(
+                f"Chain halted at step {i+1}/{len(steps)}: {str(e)[:200]}\n"
+                f"Steps {i+2}-{len(steps)} were NOT executed."
+            )
+            return
+
+        # STRICT-AND GATE
+        if result.get("audit_verdict") != "pass":
+            feedback = result.get("audit_feedback", "Unknown")[:300]
+            await update.message.reply_text(
+                f"Chain halted at step {i+1}/{len(steps)}.\n\n"
+                f"Step failed: {step_msg[:100]}\n"
+                f"Reason: {feedback}\n\n"
+                f"Steps {i+2}-{len(steps)} were NOT executed.\n"
+                f"No artifacts from this step were forwarded."
+            )
+            return
+
+        previous_artifacts = result.get("artifacts", [])
+
+        # Send step result
+        response_text = result.get("final_response", "Step completed.")
+        await _send_long_message(update, f"Step {i+1}: {response_text}")
+
+        # Send step artifacts
+        for fpath in previous_artifacts:
+            p = Path(fpath)
+            if p.exists() and p.stat().st_size > 0:
+                try:
+                    await update.message.reply_document(document=open(p, "rb"))
+                except Exception:
+                    pass
+    else:
+        # All steps completed
+        await update.message.reply_text(
+            f"Chain complete - all {len(steps)} steps passed."
+        )
+
+
+@auth_required
+async def cmd_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show debug sidecar JSON for a task: /debug <task_id>."""
+    args = context.args
+    if not args:
+        await update.message.reply_text("Usage: /debug <task_id>")
+        return
+    task_id_prefix = args[0]
+    matches = list(config.OUTPUTS_DIR.glob(f"{task_id_prefix}*.debug.json"))
+    if not matches:
+        await update.message.reply_text(f"No debug data found for '{task_id_prefix}'")
+        return
+    content = matches[0].read_text()
+    await update.message.reply_text(f"```\n{content[:3800]}\n```", parse_mode="Markdown")
 
 
 async def _send_long_message(update: Update, text: str):

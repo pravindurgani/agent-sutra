@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json as _json
 import uuid
 import logging
 from pathlib import Path
@@ -127,6 +128,8 @@ Files generated: {', '.join(Path(f).name for f in artifacts if Path(f).exists())
         if suggestion:
             summary += f"\n\n{suggestion}"
 
+    _write_debug_sidecar(state)
+
     return {"final_response": summary, "artifacts": artifacts}
 
 
@@ -150,6 +153,28 @@ def _extract_and_store_memory(state: AgentState) -> None:
         feedback = state.get("audit_feedback", "")[:300]
         content = f"Task: {state['message'][:200]}. Failed: {feedback}"
         sync_write_project_memory(project_name, "failure_pattern", content, task_id)
+
+
+def _write_debug_sidecar(state: AgentState):
+    """Write per-task debug JSON for the /debug command."""
+    try:
+        import config as _cfg
+        sidecar = {
+            "task_id": state["task_id"],
+            "message": state["message"][:300],
+            "task_type": state.get("task_type", ""),
+            "project_name": state.get("project_name", ""),
+            "stages": state.get("stage_timings", []),
+            "total_duration_ms": sum(
+                s.get("duration_ms", 0) for s in state.get("stage_timings", [])
+            ),
+            "verdict": state.get("audit_verdict", ""),
+            "retry_count": state.get("retry_count", 0),
+        }
+        path = _cfg.OUTPUTS_DIR / f"{state['task_id']}.debug.json"
+        path.write_text(_json.dumps(sidecar, indent=2))
+    except Exception as e:
+        logger.warning("Failed to write debug sidecar: %s", e)
 
 
 def _suggest_next_step(project_name: str, user_id: int) -> str | None:

@@ -312,12 +312,14 @@ IMPORTANT: Use the filled-in commands above. Do NOT leave {{file}} or {{client}}
 
     # Run via shell executor with project's working dir and timeout
     # Use randomized heredoc delimiter to avoid collision with generated code
+    task_id = state["task_id"]
     delimiter = f"AGENTSUTRA_EOF_{uuid.uuid4().hex[:8]}"
     result = run_shell(
         command=f"bash -e /dev/stdin <<'{delimiter}'\n{code}\n{delimiter}",
         working_dir=project_path,
         timeout=timeout,
         venv_path=venv,
+        task_id=task_id,
     )
 
     # Log failure details so they appear in agentsutra.log (not just swallowed by auditor)
@@ -353,6 +355,7 @@ IMPORTANT: Use the filled-in commands above. Do NOT leave {{file}} or {{client}}
             working_dir=project_path,
             timeout=timeout,
             venv_path=venv,
+            task_id=task_id,
         )
 
     # For project tasks, filter excessive artifacts (likely venv/package leak)
@@ -447,7 +450,7 @@ def _execute_code(state: AgentState) -> dict:
 
     timeout = _estimate_timeout(state)
     working_dir = _determine_working_dir(state)
-    result = run_code_with_auto_install(code, timeout=timeout, working_dir=working_dir)
+    result = run_code_with_auto_install(code, timeout=timeout, working_dir=working_dir, task_id=state["task_id"])
 
     # Prefer explicitly declared artifacts; fall back to mtime scanning
     effective_dir = working_dir or config.OUTPUTS_DIR

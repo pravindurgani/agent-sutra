@@ -44,6 +44,9 @@ class AgentState(TypedDict):
     # Auto-install tracking (populated by executor via run_code_with_auto_install)
     auto_installed_packages: list[str]
 
+    # Per-node timing for debug sidecar
+    stage_timings: list[dict]
+
     # Output
     final_response: str
     artifacts: list[str]  # file paths to send back

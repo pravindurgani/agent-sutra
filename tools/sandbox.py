@@ -17,6 +17,37 @@ import config
 
 logger = logging.getLogger(__name__)
 
+# ── Live output registry (thread-safe) ──────────────────────────────
+_live_output: dict[str, list[str]] = {}
+_live_output_lock = threading.Lock()
+
+
+def _register_live_output(task_id: str):
+    with _live_output_lock:
+        _live_output[task_id] = []
+
+
+def _append_live_output(task_id: str, line: str):
+    with _live_output_lock:
+        lines = _live_output.get(task_id)
+        if lines is not None:
+            lines.append(line)
+            if len(lines) > 50:
+                del lines[:25]  # Keep bounded
+
+
+def get_live_output(task_id: str, tail: int = 3) -> str:
+    """Get the last N lines of live stdout for a running task."""
+    with _live_output_lock:
+        lines = _live_output.get(task_id, [])
+        return "\n".join(lines[-tail:])
+
+
+def _clear_live_output(task_id: str):
+    with _live_output_lock:
+        _live_output.pop(task_id, None)
+
+
 # Docker availability cache (lazy-checked, refreshed every 60s)
 _docker_status: dict[str, Any] = {"available": False, "checked_at": 0.0}
 
@@ -662,6 +693,7 @@ def run_code(
     timeout: int | None = None,
     working_dir: Path | None = None,
     venv_path: str | None = None,
+    task_id: str = "",
 ) -> ExecutionResult:
     """Execute generated code in a subprocess or Docker container.
 
@@ -715,35 +747,67 @@ def run_code(
 
         env = _filter_env()
 
-        # Use start_new_session so we can kill the entire process group on timeout
-        proc = subprocess.Popen(
-            cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, cwd=working_dir, env=env, start_new_session=True,
-        )
+        if task_id:
+            _register_live_output(task_id)
         try:
-            stdout, stderr = proc.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            # Kill the entire process group to prevent orphaned children
-            import signal
-            os.killpg(proc.pid, signal.SIGKILL)
-            proc.wait()
-            logger.warning("Execution timed out after %ds, killed process group %d", timeout, proc.pid)
-            return ExecutionResult(success=False, stderr=f"Execution timed out after {timeout}s", timed_out=True)
+            proc = subprocess.Popen(
+                cmd, stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                cwd=working_dir, env=env, start_new_session=True,
+            )
 
-        new_files = _detect_artifacts(
-            existing_mtimes, working_dir, stdout, proc.returncode,
-            exclude_path=script_path,
-        )
-        tb = _extract_traceback(stderr) if proc.returncode != 0 else ""
+            stdout_chunks: list[str] = []
+            stderr_chunks: list[str] = []
 
-        return ExecutionResult(
-            success=proc.returncode == 0,
-            stdout=stdout[:50000],
-            stderr=stderr[:20000],
-            traceback=tb,
-            files_created=new_files,
-            return_code=proc.returncode,
-        )
+            def _read_stdout():
+                for raw_line in proc.stdout:
+                    line = raw_line.decode(errors="replace").rstrip()
+                    stdout_chunks.append(line)
+                    if task_id:
+                        _append_live_output(task_id, line)
+
+            def _read_stderr():
+                for raw_line in proc.stderr:
+                    stderr_chunks.append(raw_line.decode(errors="replace").rstrip())
+
+            t_out = threading.Thread(target=_read_stdout, daemon=True)
+            t_err = threading.Thread(target=_read_stderr, daemon=True)
+            t_out.start()
+            t_err.start()
+
+            deadline = time.time() + timeout
+            while proc.poll() is None:
+                if time.time() > deadline:
+                    import signal
+                    os.killpg(proc.pid, signal.SIGKILL)
+                    proc.wait()
+                    logger.warning("Execution timed out after %ds, killed process group %d", timeout, proc.pid)
+                    return ExecutionResult(success=False, stderr=f"Execution timed out after {timeout}s", timed_out=True)
+                time.sleep(0.1)
+
+            t_out.join(timeout=5)
+            t_err.join(timeout=5)
+
+            stdout = "\n".join(stdout_chunks)
+            stderr = "\n".join(stderr_chunks)
+
+            new_files = _detect_artifacts(
+                existing_mtimes, working_dir, stdout, proc.returncode,
+                exclude_path=script_path,
+            )
+            tb = _extract_traceback(stderr) if proc.returncode != 0 else ""
+
+            return ExecutionResult(
+                success=proc.returncode == 0,
+                stdout=stdout[:50000],
+                stderr=stderr[:20000],
+                traceback=tb,
+                files_created=new_files,
+                return_code=proc.returncode,
+            )
+        finally:
+            if task_id:
+                _clear_live_output(task_id)
     except Exception as e:
         logger.error("Execution error: %s", e)
         return ExecutionResult(success=False, stderr=str(e))
@@ -759,6 +823,7 @@ def run_code_with_auto_install(
     working_dir: Path | None = None,
     venv_path: str | None = None,
     max_install_retries: int = 2,
+    task_id: str = "",
 ) -> ExecutionResult:
     """Execute code with automatic pip install on ImportError.
 
@@ -770,7 +835,7 @@ def run_code_with_auto_install(
     use_docker = config.DOCKER_ENABLED and _docker_available()
 
     for attempt in range(max_install_retries + 1):
-        result = run_code(code, language, timeout, working_dir, venv_path)
+        result = run_code(code, language, timeout, working_dir, venv_path, task_id=task_id)
 
         if result.success:
             if auto_installed:
@@ -813,6 +878,7 @@ def run_shell(
     timeout: int | None = None,
     venv_path: str | None = None,
     env_vars: dict[str, str] | None = None,
+    task_id: str = "",
 ) -> ExecutionResult:
     """Execute a shell command with full system access.
 
@@ -859,21 +925,49 @@ def run_shell(
 
     logger.info("Shell exec: %s (cwd=%s, timeout=%ds)", command[:200], working_dir, timeout)
 
+    if task_id:
+        _register_live_output(task_id)
     try:
-        # Use start_new_session so we can kill the entire process group on timeout
         proc = subprocess.Popen(
             full_command, shell=True, stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, cwd=working_dir, env=env, start_new_session=True,
+            cwd=working_dir, env=env, start_new_session=True,
         )
-        try:
-            stdout, stderr = proc.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            import signal
-            os.killpg(proc.pid, signal.SIGKILL)
-            proc.wait()
-            logger.warning("Shell command timed out after %ds, killed process group %d", timeout, proc.pid)
-            return ExecutionResult(success=False, stderr=f"Timed out after {timeout}s", timed_out=True)
+
+        stdout_chunks: list[str] = []
+        stderr_chunks: list[str] = []
+
+        def _read_stdout():
+            for raw_line in proc.stdout:
+                line = raw_line.decode(errors="replace").rstrip()
+                stdout_chunks.append(line)
+                if task_id:
+                    _append_live_output(task_id, line)
+
+        def _read_stderr():
+            for raw_line in proc.stderr:
+                stderr_chunks.append(raw_line.decode(errors="replace").rstrip())
+
+        t_out = threading.Thread(target=_read_stdout, daemon=True)
+        t_err = threading.Thread(target=_read_stderr, daemon=True)
+        t_out.start()
+        t_err.start()
+
+        deadline = time.time() + timeout
+        while proc.poll() is None:
+            if time.time() > deadline:
+                import signal
+                os.killpg(proc.pid, signal.SIGKILL)
+                proc.wait()
+                logger.warning("Shell command timed out after %ds, killed process group %d", timeout, proc.pid)
+                return ExecutionResult(success=False, stderr=f"Timed out after {timeout}s", timed_out=True)
+            time.sleep(0.1)
+
+        t_out.join(timeout=5)
+        t_err.join(timeout=5)
+
+        stdout = "\n".join(stdout_chunks)
+        stderr = "\n".join(stderr_chunks)
 
         new_files = _detect_artifacts(
             existing_mtimes, working_dir, stdout, proc.returncode,
@@ -891,6 +985,9 @@ def run_shell(
     except Exception as e:
         logger.error("Shell execution error: %s", e)
         return ExecutionResult(success=False, stderr=str(e))
+    finally:
+        if task_id:
+            _clear_live_output(task_id)
 
 
 _PIP_NAME_MAP = {

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time as _time
 from langgraph.graph import StateGraph, START, END
 
 from brain.state import AgentState
@@ -38,10 +39,16 @@ def clear_stage(task_id: str):
 
 
 def _wrap_node(name: str, func):
-    """Wrap a node function to update stage tracking."""
+    """Wrap a node function to update stage tracking and record timing."""
     def wrapper(state: AgentState) -> dict:
         set_stage(state["task_id"], name)
-        return func(state)
+        t0 = _time.time()
+        result = func(state)
+        elapsed_ms = int((_time.time() - t0) * 1000)
+        timings = list(state.get("stage_timings", []))
+        timings.append({"name": name, "duration_ms": elapsed_ms})
+        result["stage_timings"] = timings
+        return result
     return wrapper
 
 
@@ -115,6 +122,7 @@ def run_task(
         "working_dir": "",
         "conversation_context": conversation_context,
         "auto_installed_packages": [],
+        "stage_timings": [],
     }
 
     logger.info("Starting agent pipeline for task %s", task_id)

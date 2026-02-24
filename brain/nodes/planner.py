@@ -8,6 +8,7 @@ from brain.state import AgentState
 from tools import claude_client
 from tools.file_manager import get_file_content, format_file_metadata_for_prompt
 from tools.projects import get_project_context
+from storage.db import sync_query_project_memories
 
 logger = logging.getLogger(__name__)
 
@@ -200,6 +201,22 @@ def plan(state: AgentState) -> dict:
             except OSError:
                 pass
 
+    # Inject lessons learned from previous runs of this project
+    if task_type == "project" and state.get("project_name"):
+        memories = sync_query_project_memories(state["project_name"], limit=5)
+        if memories:
+            lessons = "\n".join(
+                f"- [{mtype}] {content}" for mtype, content in memories
+            )
+            system += (
+                f"\n\nLESSONS LEARNED FROM PREVIOUS RUNS OF {state['project_name'].upper()}:\n"
+                f"{lessons}"
+            )
+
+    # Inject relevant source files for project tasks (costs ~$0.02 per call)
+    if task_type == "project" and state.get("project_config", {}).get("path"):
+        system = _inject_project_files(state, system)
+
     prompt = f"Task: {state['message']}"
 
     # Include conversation context if available
@@ -238,3 +255,98 @@ def plan(state: AgentState) -> dict:
     response = claude_client.call(prompt, system=system, max_tokens=3000, thinking=use_thinking)
     logger.info("Plan created for task %s (type=%s, %d chars, thinking=%s)", state["task_id"], task_type, len(response), use_thinking)
     return {"plan": response}
+
+
+# ── Dynamic file injection for project tasks ─────────────────────────
+
+_FILE_SELECTOR_SYSTEM = (
+    "You are a file selector. Given a task description and a file tree, "
+    "return ONLY a JSON list of the 3-5 most relevant file paths. No explanation."
+)
+
+_INJECT_EXTENSIONS = {".py", ".ts", ".js", ".sh", ".yaml", ".yml", ".toml", ".cfg", ".ini"}
+_INJECT_EXCLUDE_DIRS = {"__pycache__", "node_modules", ".next", "venv", ".venv", ".git", ".tox", "dist", "build"}
+
+
+def _inject_project_files(state: AgentState, system: str) -> str:
+    """Select and inject the most relevant source files for a project task.
+
+    Costs one extra Sonnet call (~$0.02) to pick files. If anything fails,
+    returns the system prompt unmodified.
+    """
+    import json
+
+    project_config = state.get("project_config", {})
+    project_path = Path(project_config.get("path", ""))
+    project_name = state.get("project_name", project_path.name)
+
+    if not project_path.is_dir():
+        return system
+
+    # Collect source files, respecting exclusion list
+    source_files: list[str] = []
+    try:
+        for p in project_path.rglob("*"):
+            if any(excluded in p.parts for excluded in _INJECT_EXCLUDE_DIRS):
+                continue
+            if p.is_file() and p.suffix in _INJECT_EXTENSIONS:
+                source_files.append(str(p.relative_to(project_path)))
+    except OSError as e:
+        logger.warning("Failed to scan project directory %s: %s", project_path, e)
+        return system
+
+    if not source_files:
+        return system
+
+    # Skip injection for large projects — doesn't scale without RAG
+    if len(source_files) > 50:
+        logger.info(
+            "Skipping file injection for %s: %d files exceeds 50-file cap",
+            project_name, len(source_files),
+        )
+        return system
+
+    # Ask Claude to pick the 3-5 most relevant files
+    tree_listing = "\n".join(sorted(source_files))
+    selector_prompt = (
+        f"Task: {state['message'][:500]}\n\n"
+        f"Project file tree:\n{tree_listing}"
+    )
+
+    try:
+        selection = claude_client.call(
+            selector_prompt,
+            system=_FILE_SELECTOR_SYSTEM,
+            max_tokens=300,
+            temperature=0.0,
+        )
+        selected = json.loads(selection)
+        if not isinstance(selected, list):
+            raise ValueError("Expected a JSON list")
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.warning("File selector returned unparseable response: %s", e)
+        return system
+    except Exception as e:
+        logger.warning("File selector call failed: %s", e)
+        return system
+
+    # Read selected files and append to system prompt
+    injected_parts: list[str] = []
+    for rel_path in selected[:5]:
+        full = project_path / rel_path
+        if not full.is_file():
+            continue
+        try:
+            content = full.read_text(encoding="utf-8", errors="replace")[:3000]
+            injected_parts.append(f"--- {rel_path} ---\n{content}")
+        except OSError:
+            continue
+
+    if injected_parts:
+        system += (
+            f"\n\nRELEVANT CODE FROM {project_name.upper()}:\n"
+            + "\n\n".join(injected_parts)
+        )
+        logger.info("Injected %d files for project %s", len(injected_parts), project_name)
+
+    return system

@@ -3,6 +3,8 @@ from __future__ import annotations
 import aiosqlite
 import json
 import logging
+import sqlite3
+import threading
 import time
 from datetime import datetime, timezone
 
@@ -47,6 +49,18 @@ CREATE TABLE IF NOT EXISTS conversation_history (
 )
 """
 
+_CREATE_PROJECT_MEMORY = """
+CREATE TABLE IF NOT EXISTS project_memory (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_name TEXT NOT NULL,
+    memory_type TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    task_id TEXT,
+    UNIQUE(project_name, memory_type, content)
+)
+"""
+
 
 async def init_db():
     """Create tables if they don't exist. Enables WAL mode for concurrent write safety."""
@@ -55,6 +69,8 @@ async def init_db():
         await db.execute(_CREATE_TASKS)
         await db.execute(_CREATE_CONVERSATION_CONTEXT)
         await db.execute(_CREATE_CONVERSATION_HISTORY)
+        await db.execute(_CREATE_PROJECT_MEMORY)
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_projmem_name ON project_memory(project_name)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_tasks_user_time ON tasks(user_id, created_at)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_context_user ON conversation_context(user_id)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)")
@@ -216,6 +232,51 @@ async def build_conversation_context(user_id: int, limit: int = 6) -> str:
         lines.append(f"{role_label}: {content}")
 
     return "\n".join(lines)
+
+
+# ── Project memory (synchronous — used by pipeline nodes in asyncio.to_thread) ─
+
+# Pipeline nodes (deliverer, planner) run synchronously via asyncio.to_thread().
+# They CANNOT use aiosqlite. This follows the same pattern as
+# claude_client._persist_usage() which uses synchronous sqlite3.
+_sync_db_lock = threading.Lock()
+
+
+def sync_write_project_memory(
+    project_name: str, memory_type: str, content: str, task_id: str | None = None,
+) -> None:
+    """Write a memory entry using synchronous sqlite3."""
+    with _sync_db_lock:
+        conn = sqlite3.connect(str(config.DB_PATH), timeout=20.0)
+        try:
+            conn.execute(
+                "INSERT OR IGNORE INTO project_memory "
+                "(project_name, memory_type, content, created_at, task_id) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (project_name, memory_type, content,
+                 datetime.now(timezone.utc).isoformat(), task_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def sync_query_project_memories(
+    project_name: str, limit: int = 5,
+) -> list[tuple[str, str]]:
+    """Read recent memories using synchronous sqlite3."""
+    with _sync_db_lock:
+        conn = sqlite3.connect(str(config.DB_PATH), timeout=20.0)
+        try:
+            cursor = conn.execute(
+                "SELECT memory_type, content FROM project_memory "
+                "WHERE project_name = ? "
+                "ORDER BY created_at DESC LIMIT ?",
+                (project_name, limit),
+            )
+            return cursor.fetchall()
+        finally:
+            conn.close()
 
 
 # ── Crash recovery ───────────────────────────────────────────────────

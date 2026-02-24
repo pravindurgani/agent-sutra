@@ -6,6 +6,7 @@ from pathlib import Path
 
 from brain.state import AgentState
 from tools import claude_client
+from storage.db import sync_write_project_memory
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +116,34 @@ Files generated: {', '.join(Path(f).name for f in artifacts if Path(f).exists())
         len(artifacts),
     )
 
+    try:
+        _extract_and_store_memory(state)
+    except Exception as e:
+        logger.warning("Failed to store project memory: %s", e)
+
     return {"final_response": summary, "artifacts": artifacts}
+
+
+def _extract_and_store_memory(state: AgentState) -> None:
+    """Extract a success or failure pattern and persist to project_memory."""
+    project_name = state.get("project_name")
+    if not project_name:
+        return  # Only store memories for project-type tasks
+
+    verdict = state.get("audit_verdict", "")
+    task_id = state.get("task_id", "")
+
+    if verdict == "pass":
+        content = (
+            f"Task: {state['message'][:200]}. "
+            f"Command used: {state.get('code', '')[:300]}. "
+            f"Params: {state.get('extracted_params', {})}."
+        )
+        sync_write_project_memory(project_name, "success_pattern", content, task_id)
+    else:
+        feedback = state.get("audit_feedback", "")[:300]
+        content = f"Task: {state['message'][:200]}. Failed: {feedback}"
+        sync_write_project_memory(project_name, "failure_pattern", content, task_id)
 
 
 def _extract_output(execution_result: str) -> str:

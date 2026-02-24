@@ -1,14 +1,15 @@
-# Coding Standards (read by AgentSutra planner)
+# Coding Standards
 
 ## Python
-- Use pathlib.Path, never os.path
-- Always use logging module, never bare print() for status messages
-- All functions must have type hints
-- No bare except clauses — catch specific exceptions
-- Use assert statements for all intermediate validation
-- Prefer f-strings over .format()
-- Use with statements for all file I/O
+- Use pathlib.Path instead of os.path
+- Use logging module, never bare print() for diagnostics
+- Add type hints to function signatures
+- No bare except — always catch specific exceptions
+- Use assert statements to verify outputs
+- Prefer f-strings over .format() or %
+- Use context managers (with) for file and resource handling
 
 ## Shell
-- Use set -euo pipefail at the top of every bash script
-- Quote all variable expansions
+- Start scripts with set -euo pipefail
+- Quote all variable expansions: "$var" not $var
+- Use absolute paths where possible

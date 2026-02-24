@@ -77,6 +77,7 @@ BIG_DATA_ROW_THRESHOLD = int(os.getenv("BIG_DATA_ROW_THRESHOLD", "500"))
 # Resource management
 MAX_CONCURRENT_TASKS = int(os.getenv("MAX_CONCURRENT_TASKS", "3"))
 RAM_THRESHOLD_PERCENT = int(os.getenv("RAM_THRESHOLD_PERCENT", "90"))
+MAX_FILE_INJECT_COUNT = int(os.getenv("MAX_FILE_INJECT_COUNT", "50"))
 
 # Docker sandbox (for isolated code execution)
 DOCKER_ENABLED = os.getenv("DOCKER_ENABLED", "false").lower() in ("true", "1", "yes")

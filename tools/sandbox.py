@@ -103,9 +103,10 @@ _BLOCKED_PATTERNS = [
     r">>?\s*~/?\.(ssh|bashrc|bash_profile|zshrc|zprofile|profile|gitconfig|gnupg|npmrc|netrc)",
     # Symlink attacks on critical dotfiles
     r"\bln\s+.*~/?\.(ssh|bashrc|bash_profile|zshrc|zprofile|profile|gitconfig|gnupg)",
-    # printf/echo piped to shell (like curl|sh but via printf/echo)
+    # printf/echo/cat piped to shell (like curl|sh but via printf/echo/cat)
     r"\bprintf\b.*\|\s*(sh|bash)\b",
     r"\becho\b.*\|\s*(sh|bash)\b",
+    r"\bcat\b.*\|\s*\b(sh|bash)\b",
     # eval with command substitution (obfuscation wrapper)
     r"\beval\b\s+\"?\$\(",
     # bash/sh -c with embedded empty quotes (string splitting obfuscation)

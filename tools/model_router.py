@@ -76,8 +76,9 @@ def _select_model(purpose: str, complexity: str) -> tuple[str, str]:
         return ("claude", config.DEFAULT_MODEL)
 
     # Rule (d): Budget escalation — check before complexity routing
+    # Also check RAM: don't route to Ollama under critical memory pressure
     if purpose in ("classify", "plan") and _daily_spend_exceeds_threshold(0.7):
-        if _ollama_available():
+        if _ollama_available() and _ram_below_threshold(90):
             return ("ollama", config.OLLAMA_DEFAULT_MODEL)
 
     # Rule (c): Low-complexity classify/plan → try Ollama

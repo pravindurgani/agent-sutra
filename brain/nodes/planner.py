@@ -306,10 +306,10 @@ def _inject_project_files(state: AgentState, system: str) -> str:
         return system
 
     # Skip injection for large projects — doesn't scale without RAG
-    if len(source_files) > 50:
+    if len(source_files) > config.MAX_FILE_INJECT_COUNT:
         logger.info(
-            "Skipping file injection for %s: %d files exceeds 50-file cap",
-            project_name, len(source_files),
+            "Skipping file injection for %s: %d files exceeds %d-file cap",
+            project_name, len(source_files), config.MAX_FILE_INJECT_COUNT,
         )
         return system
 

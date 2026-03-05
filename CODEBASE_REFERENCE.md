@@ -1,8 +1,10 @@
-# AgentSutra v8.0.0 - Complete Codebase Reference
+# AgentSutra — Complete Codebase Reference
 
 Every folder, file, and configuration in the AgentSutra project — what it is, what it does, and why it was built this way.
 
-**Generated:** 2026-02-24
+**Generated:** 2026-02-24 (v8.0.0 baseline)
+
+> **Note:** This reference was written at v8.0.0. Versions 8.1.0–8.4.0 added: `tools/deployer.py` (static deployment), `tools/visual_check.py` (Playwright verification), server management in `tools/sandbox.py`, `/deploy`, `/servers`, `/stopserver` commands, `server_url` and `deploy_url` in AgentState, Firebase Hosting support, and visual check context in the auditor. See [AGENTSUTRA.md changelog](AGENTSUTRA.md#changelog) for full details.
 
 ---
 
@@ -32,14 +34,15 @@ Every folder, file, and configuration in the AgentSutra project — what it is, 
 
 AgentSutra is a self-hosted Telegram bot that receives natural language tasks, processes them through a 5-stage LangGraph pipeline (Classify → Plan → Execute → Audit → Deliver), and returns results. It runs on a Mac Mini M2 (16GB) for a single authenticated user.
 
-**Key numbers (v8.0.0):**
-- ~5,000 lines of application code across 16 source files
-- ~6,500 lines of test code across 18 test files
-- 527 automated tests (527 pass, 11 skip — Docker required)
-- 13 Telegram commands
+**Key numbers (v8.4.0):**
+- ~5,500 lines of application code across 18 source files
+- ~8,000 lines of test code across 22 test files
+- 561 automated tests passing (25 skipped — Docker required)
+- 16 Telegram commands
 - 7 task types
 - 39 blocked command patterns (Tier 1 security)
 - 5-stage pipeline with cross-model auditing (Sonnet writes, Opus reviews)
+- 3 deployment providers (GitHub Pages, Vercel, Firebase)
 
 ---
 

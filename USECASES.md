@@ -1,17 +1,17 @@
-# AgentSutra v8.0.0 — Complete Capabilities & Usage Guide
+# AgentSutra — Capabilities & Usage Guide
 
-**Status: GOD MODE ACHIEVED**
+> **Version:** 8.4.0 | **Last updated:** March 2026
 
-AgentSutra is a fully autonomous AI agent system controlled via Telegram, running on Mac Mini M2. It combines Claude Sonnet 4.6 (generation) + Claude Opus 4.6 (adversarial auditing) with unrestricted shell access, full internet, local AI orchestration, big data processing, and production frontend generation — all from your phone. Hardened with budget enforcement, RAM guards, rate limiting, 39-pattern command blocklist, code content scanner, pattern-based credential filtering, parameter injection prevention, optional Docker container isolation for code execution, process group kill on timeout, fail-safe audit defaults, pipeline-level timeouts, error sanitization, environment error detection, project dependency bootstrapping, and 527 automated tests.
+A fully autonomous AI agent controlled via Telegram, running on Mac Mini M2. Claude Sonnet generates, Claude Opus audits. Full shell access, internet, local AI, big data, frontend generation, static deployment, visual verification — all from your phone. Hardened with defense-in-depth security.
 
 ---
 
 ## Table of Contents
 
-1. [What God Mode Means](#what-god-mode-means)
+1. [What It Can Do](#what-it-can-do)
 2. [7 Task Types](#7-task-types)
 3. [Full Capabilities Matrix](#full-capabilities-matrix)
-4. [11 Telegram Commands](#11-telegram-commands)
+4. [16 Telegram Commands](#16-telegram-commands)
 5. [How to Use It Effectively](#how-to-use-it-effectively)
 6. [Portfolio Project Automations](#portfolio-project-automations)
 7. [General-Purpose Use Cases](#general-purpose-use-cases)
@@ -21,39 +21,35 @@ AgentSutra is a fully autonomous AI agent system controlled via Telegram, runnin
 
 ---
 
-## What God Mode Means
+## What It Can Do
 
-God Mode = the agent has the same power level as you sitting at the terminal, but you control it from your phone via Telegram.
+The agent has the same power level as you at the terminal — controlled from your phone via Telegram.
 
-| Capability | Status | How |
-|-----------|--------|-----|
-| Full internet access | YES | requests, beautifulsoup4, httpx, duckduckgo-search |
-| Run any shell command | YES | /exec or natural language; routed through sandbox.run_shell() |
-| Install any package at runtime | YES | Auto-detects ImportError, maps pip names, retries automatically |
-| Read/write any file on disk | YES | Full ~/  access, working directory auto-detection |
-| Run existing projects | YES | 8+ registered projects with trigger matching and venv support |
-| Orchestrate local AI (Ollama) | YES | Pull models, generate text, embeddings at localhost:11434 |
-| Process big data locally | YES | pandas, duckdb, polars — never sends raw data to Claude |
-| Build production frontends | YES | React 18 + Tailwind + Chart.js, single HTML, opens in browser |
-| Schedule recurring tasks | YES | APScheduler with SQLite persistence, survives reboots |
-| Cross-model adversarial auditing | YES | Sonnet generates, Opus reviews — catches hallucinations |
-| Auto-retry with traceback injection | YES | Up to 3 retries, exact error fed back to planner |
-| Conversation memory | YES | SQLite-backed context + history, follows up across tasks |
-| Cost tracking + budget enforcement | YES | Per-model token tracking, daily/monthly spend limits enforced per API call |
-| RAM guard + concurrency cap | YES | Rejects tasks when RAM > 90% or concurrent tasks >= 3 |
-| Rate limiting | YES | 5-second per-user cooldown between task submissions |
-| Storage auto-cleanup | YES | Prunes old data (30d/90d) and workspace files (7d) on startup |
-| Monthly maintenance cron | YES | SQLite VACUUM, pip-cache cleanup, Docker prune — launchd scheduled |
-| 527 automated tests | YES | Unit + integration + handler + adversarial stress + e2e artifact delivery tests with mocked pipeline |
-| Docker container isolation | YES | Optional: isolates run_code() in disposable containers, host filesystem inaccessible |
-| Docker network isolation | YES | `DOCKER_NETWORK=none` for airgapped execution of sensitive data tasks |
+| Capability | How |
+|-----------|-----|
+| Full internet access | requests, httpx, beautifulsoup4, duckduckgo-search |
+| Run any shell command | /exec or natural language via sandbox |
+| Install packages at runtime | Auto-detects ImportError, maps pip names, retries |
+| Read/write any file on disk | Full ~/ access, working directory auto-detection |
+| Run existing projects | 12 registered projects with trigger matching and venv support |
+| Orchestrate local AI (Ollama) | Pull models, generate text, embeddings at localhost:11434 |
+| Process big data locally | pandas, DuckDB, Polars — raw data never leaves the machine |
+| Build production frontends | React 18 + Tailwind + Chart.js, single self-contained HTML |
+| Deploy generated sites | Auto-deploy to GitHub Pages, Vercel, or Firebase Hosting |
+| Preview generated apps | Auto-starts local server, optional Playwright visual check |
+| Schedule recurring tasks | APScheduler with SQLite persistence, survives reboots |
+| Cross-model auditing | Sonnet generates, Opus reviews — catches hallucinations |
+| Auto-retry with tracebacks | Up to 3 retries, exact error fed back to planner |
+| Conversation memory | SQLite-backed context + project success/failure patterns |
+| Cost tracking + budgets | Per-model token tracking, daily/monthly spend limits |
+| Docker container isolation | Optional: disposable containers, host filesystem inaccessible |
 
-**What's NOT unlocked (by design):**
-- 39 catastrophic command patterns (rm -rf, mkfs, sudo, curl|sh, wget|bash, chmod 777, python -c, find -delete, base64|bash, mv ~/, printf|sh, eval, bash -c string splitting, dotfile writes, symlink attacks, cat|bash, etc.) — always blocked
-- All credentials stripped from subprocess env (exact-match keys + pattern-based: KEY, TOKEN, SECRET, PASSWORD, CREDENTIAL)
-- Docker isolation (optional): code execution in containers with only workspace dirs mounted — host filesystem, SSH keys, `.env` completely inaccessible
+**What's blocked (by design):**
+- 39 catastrophic command patterns (rm -rf, sudo, curl|sh, chmod 777, etc.) — always blocked
+- All credentials stripped from subprocess environment via pattern matching
+- Docker isolation (optional): only workspace dirs mounted, host filesystem inaccessible
 - Files outside HOME directory — boundary check enforced
-- Spend beyond configured budget — daily/monthly limits enforced per API call
+- Spend beyond configured budget — limits enforced per API call
 
 ---
 
@@ -211,24 +207,26 @@ Build a Spotify-style music player UI with playlist management
 
 ---
 
-## 11 Telegram Commands
+## 16 Telegram Commands
 
 | Command | What It Does |
 |---------|-------------|
-| `/start` | Welcome message, shows all capabilities |
+| `/start` | Welcome message with capabilities overview |
 | `/status` | Current pipeline stage of active tasks |
-| `/history` | Last 5 tasks with status (done/err/stop) |
+| `/history` | Recent tasks with status, duration, errors |
 | `/usage` | Lifetime API token counts |
-| `/cost` | Estimated API spend broken down by model |
-| `/health` | System check: Python version, Ollama status, disk space, API stats |
-| `/exec <cmd>` | Run any shell command directly (routed through safety layer) |
-| `/context` | View conversation memory and stored context |
-| `/context clear` | Wipe all conversation history and context |
-| `/cancel` | Cancel all running tasks |
-| `/projects` | List all registered projects with commands and triggers |
-| `/schedule <min> <task>` | Schedule a recurring task |
-| `/schedule list` | Show all scheduled tasks with next run time |
-| `/schedule remove <id>` | Remove a scheduled task |
+| `/cost` | API spend: today, this month, all-time, per-model |
+| `/health` | System status: RAM, disk, Docker, Ollama, active tasks |
+| `/exec <cmd>` | Run a shell command directly (through safety layer) |
+| `/context` | View or clear conversation memory |
+| `/cancel` | Cancel running tasks |
+| `/projects` | List registered projects with triggers and commands |
+| `/schedule` | Schedule recurring tasks, list, or remove (`/schedule list`, `/schedule remove <id>`) |
+| `/chain` | Execute strict-AND task chain (`step 1 -> step 2 -> ...`) |
+| `/debug <id>` | Per-task debug JSON (stage timings, verdict, retries) |
+| `/deploy <id>` | Manually deploy a task's frontend artifacts |
+| `/servers` | List running local preview servers |
+| `/stopserver` | Stop a server by task ID or stop all |
 
 ---
 
@@ -631,16 +629,16 @@ The job survives bot restarts via APScheduler SQLite persistence.
       |
  [Telegram Bot API]
       |
- [AgentSutra v8.0.0 on Mac Mini M2]
+ [AgentSutra v8.4.0 on Mac Mini M2]
       |
  classify ──> plan ──> execute ──> audit ──> deliver
  (Sonnet)    (Sonnet)  (Sonnet)   (Opus)    (Sonnet)
-                          |          |
-                          |     fail + feedback
-                          +<── retry (max 3) ──+
-                          |
-              +-----------+-----------+
-              |           |           |
+                          |          |          |
+                          |     fail + feedback  |
+                          +<── retry (max 3) ──+ |
+                          |                      |
+              +-----------+-----------+     deploy +
+              |           |           |     preview
           run_code    run_shell    save HTML
           (Python)    (projects)   (frontend)
               |           |           |
@@ -650,5 +648,3 @@ The job survives bot restarts via APScheduler SQLite persistence.
          [Full System Access]
          Internet | Ollama | ~/ filesystem | Any shell command
 ```
-
-**527 tests (527 passed + 11 skipped). 11 skipped tests require Docker Desktop. Zero known bugs. Production-ready.**

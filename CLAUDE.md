@@ -3,7 +3,7 @@
 Single-user, self-hosted AI agent. Telegram-controlled. Mac Mini M2 (16GB).
 Fixed 5-stage LangGraph pipeline: Classify → Plan → Execute → Audit → Deliver.
 Cross-model adversarial auditing: Sonnet generates, Opus reviews.
-~5,000 LOC across 16 source files. ~7,000 LOC tests across 18 files. 548 tests (36 skip for Docker).
+~5,000 LOC across 17 source files. ~7,200 LOC tests across 19 files. 553 tests (36 skip for Docker).
 
 ## Architecture
 
@@ -32,6 +32,7 @@ Cross-model adversarial auditing: Sonnet generates, Opus reviews.
 | `tools/claude_client.py` | 332 | Anthropic API wrapper: retries, cost tracking, streaming, budget |
 | `tools/file_manager.py` | 154 | Upload handling, metadata extraction, content reading |
 | `tools/deployer.py` | 170 | Static deployment: GitHub Pages, Vercel, credential-safe subprocess |
+| `tools/visual_check.py` | 80 | Playwright headless Chromium: page load, console errors, screenshot |
 | `tools/projects.py` | 100 | Project registry loader, trigger matcher |
 | `storage/db.py` | 369 | SQLite ops: async (bot) + sync (pipeline), 4 tables, WAL mode |
 | `scheduler/cron.py` | 66 | APScheduler with SQLite persistence |
@@ -47,7 +48,7 @@ Cross-model adversarial auditing: Sonnet generates, Opus reviews.
 | Execute (params) | Sonnet | No | `_extract_params()` | `extracted_params` |
 | Execute (code gen) | Sonnet | No | `_generate_code()` | `code` |
 | Execute (run) | — | — | `run_code()` / `run_shell()` | `execution_result` |
-| Audit | **Opus always** | No | `audit()` | `audit_verdict`, `audit_feedback` |
+| Audit | **Opus always** | No | `audit()` | `audit_verdict`, `audit_feedback` (+ visual check context for frontend) |
 | Deliver | Sonnet | No | `deliver()` | `final_response`, `artifacts`, `deploy_url` |
 
 ## Database Schema (SQLite WAL)
@@ -80,6 +81,7 @@ Cross-model adversarial auditing: Sonnet generates, Opus reviews.
 - **Credential stripping** — `_filter_env()` removes API keys/tokens/secrets from subprocess env via exact match + substring.
 - **Docker isolation** — Optional container execution. Only `workspace/` mounted. All caps dropped, PIDs limited to 256.
 - **Opus audit gate** — Every output reviewed by a different model before delivery.
+- **Visual verification** — Optional Playwright check for frontend tasks: page loads, console errors, screenshot (feeds into audit prompt).
 - **Budget enforcement** — Daily/monthly caps checked before every Claude API call.
 - **RAM guard** — Rejects tasks above 90% memory usage.
 
@@ -101,6 +103,8 @@ Cross-model adversarial auditing: Sonnet generates, Opus reviews.
 | `SERVER_MAX_LIFETIME` | 300s | Auto-kill servers after this |
 | `SERVER_PORT_RANGE_START` | 8100 | Port range for dev servers |
 | `SERVER_PORT_RANGE_END` | 8120 | Port range upper bound |
+| `VISUAL_CHECK_ENABLED` | false | Enable Playwright visual verification |
+| `VISUAL_CHECK_TIMEOUT` | 15s | Navigation timeout for visual checks |
 
 ## Environment Variables (from .env)
 

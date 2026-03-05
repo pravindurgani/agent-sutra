@@ -156,6 +156,22 @@ Execution result:
     if task_type == "project" and state.get("extracted_params"):
         prompt += f"\n\nExtracted parameters: {state.get('extracted_params')}"
 
+    # Visual check for frontend tasks with a running server
+    if task_type in ("frontend", "ui_design") and state.get("server_url") and config.VISUAL_CHECK_ENABLED:
+        try:
+            from tools.visual_check import check_page
+            vc = check_page(state["server_url"], config.OUTPUTS_DIR, config.VISUAL_CHECK_TIMEOUT)
+            if vc.checked:
+                visual_context = f"\n\nVISUAL VERIFICATION:\n- Page loads: {vc.loads}\n- HTTP status: {vc.status_code}"
+                if vc.console_errors:
+                    visual_context += f"\n- Console errors: {vc.console_errors[:5]}"
+                if not vc.loads:
+                    visual_context += "\nWARNING: Generated page did not load in browser."
+                prompt += visual_context
+                logger.info("Visual check for %s: loads=%s, status=%d", state["task_id"], vc.loads, vc.status_code)
+        except Exception as e:
+            logger.warning("Visual check error: %s", e)
+
     # Use a DIFFERENT model for adversarial review (cross-model verification)
     # Executor uses DEFAULT_MODEL (Sonnet), Auditor uses COMPLEX_MODEL (Opus)
     audit_model = config.COMPLEX_MODEL if config.COMPLEX_MODEL != config.DEFAULT_MODEL else config.DEFAULT_MODEL

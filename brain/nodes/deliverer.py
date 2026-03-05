@@ -54,6 +54,12 @@ def deliver(state: AgentState) -> dict:
         if code_file and code_file not in artifacts:
             artifacts.append(code_file)
 
+    # Attach visual check screenshot if available
+    if state.get("server_url") and config.VISUAL_CHECK_ENABLED:
+        screenshot = config.OUTPUTS_DIR / "preview.png"
+        if screenshot.exists() and str(screenshot) not in artifacts:
+            artifacts.append(str(screenshot))
+
     # Deploy if enabled and audit passed
     deploy_url = ""
     if verdict == "pass" and task_type in ("frontend", "ui_design") and artifacts:

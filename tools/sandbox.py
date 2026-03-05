@@ -199,6 +199,20 @@ def _check_code_safety(code: str) -> str | None:
     return None
 
 
+def _check_shell_safety(code: str) -> str | None:
+    """Scan bash script content for Tier 1 blocked patterns.
+
+    Applies the same blocklist used by _check_command_safety() but against the
+    full script body, not just the wrapper command. This catches dangerous patterns
+    inside heredocs, multi-line scripts, and .sh files that would otherwise bypass
+    the command-level check.
+    """
+    for pattern in _BLOCKED_RE:
+        if pattern.search(code):
+            return f"BLOCKED: Shell script contains catastrophic pattern '{pattern.pattern}'."
+    return None
+
+
 def _validate_working_dir(working_dir: Path) -> str | None:
     """Validate that working_dir is within HOST_HOME."""
     try:
@@ -713,9 +727,13 @@ def run_code(
     # Lightweight code content scan (defense-in-depth, not a security boundary)
     if language == "python":
         safety_msg = _check_code_safety(code)
-        if safety_msg:
-            logger.warning("Code content blocked: %s", safety_msg)
-            return ExecutionResult(success=False, stderr=safety_msg)
+    elif language == "bash":
+        safety_msg = _check_shell_safety(code)
+    else:
+        safety_msg = None
+    if safety_msg:
+        logger.warning("Code content blocked: %s", safety_msg)
+        return ExecutionResult(success=False, stderr=safety_msg)
 
     safety_msg = _validate_working_dir(working_dir)
     if safety_msg:

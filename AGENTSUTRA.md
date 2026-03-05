@@ -1,8 +1,8 @@
-# AgentSutra v8.0.0 - Complete Project Documentation
+# AgentSutra v8.4.0 - Complete Project Documentation
 
-A Telegram-driven AI agent server running on Mac Mini M2 (16GB). Receives tasks via Telegram, processes them through a LangGraph Plan-Execute-Audit pipeline powered by Claude API, and delivers results back. Features: project registry with shared auto-managed venv, cross-model adversarial auditing (Sonnet+Opus), full internet access, local AI orchestration (Ollama), big data processing, production frontend generation, Docker container isolation for code execution, 7 task types, 13 commands, budget enforcement, RAM guards, code content scanner, 39-pattern command blocklist, environment error detection, project dependency bootstrapping, streaming for extended thinking, honest failure delivery, and 527+ automated tests.
+A Telegram-driven AI agent server running on Mac Mini M2 (16GB). Receives tasks via Telegram, processes them through a LangGraph Plan-Execute-Audit pipeline powered by Claude API, and delivers results back. Features: project registry with shared auto-managed venv, cross-model adversarial auditing (Sonnet+Opus), full internet access, local AI orchestration (Ollama), big data processing, production frontend generation, Docker container isolation for code execution, static deployment (GitHub Pages, Vercel, Firebase Hosting), local server preview with auto-kill, Playwright visual verification, 7 task types, 16 commands, budget enforcement, RAM guards, code content scanner, 39-pattern command blocklist, environment error detection, project dependency bootstrapping, streaming for extended thinking, honest failure delivery, cross-task memory, model routing, task chaining, and 561+ automated tests.
 
-**Last updated:** 2026-02-24
+**Last updated:** 2026-03-05
 
 ---
 
@@ -69,7 +69,7 @@ Every architectural decision in this codebase was made through the lens of: **"W
          |
     [Telegram Bot API]
          |
-    [bot/telegram_bot.py]        Entry point: 13 commands, file handlers
+    [bot/telegram_bot.py]        Entry point: 16 commands, file handlers
          |
     [bot/handlers.py]            Auth, streaming status, file routing
          |                            |
@@ -90,11 +90,11 @@ Every architectural decision in this codebase was made through the lens of: **"W
     [Claude API]   [Sandbox]     [Shell Exec]  [File Manager]
     Sonnet (exec)  run_code()    run_shell()   upload/download
     Opus (audit)   subprocess    venv support
-         |
-    [projects.yaml]          [storage/db.py]
-    Project registry         SQLite async CRUD
-    8 projects               Task history
-    Trigger matching
+         |              |
+    [projects.yaml]  [Deployer]   [Visual Check]   [storage/db.py]
+    Project registry  GitHub Pages  Playwright       SQLite async CRUD
+    12 projects       Vercel        headless         Task history
+    Trigger matching  Firebase      screenshot       Project memory
 ```
 
 ### Data Flow
@@ -109,7 +109,8 @@ Every architectural decision in this codebase was made through the lens of: **"W
 8. For code tasks: executor generates code, `run_code()` executes in sandbox subprocess
 9. Auditor uses a DIFFERENT model (Opus) than executor (Sonnet) for adversarial cross-model review
 10. On audit failure: retry loop feeds traceback + feedback back to planner (up to 3 retries)
-11. Deliverer formats response, handler sends text + artifact files back via Telegram
+11. For frontend/ui_design tasks: executor auto-starts local preview server; auditor runs Playwright visual check if enabled
+12. Deliverer formats response, auto-deploys frontend artifacts if deployment is enabled, handler sends text + artifact files back via Telegram
 
 ---
 
@@ -133,25 +134,27 @@ AgentSutra/
 |
 |-- bot/                        # Telegram bot layer
 |   |-- __init__.py
-|   |-- telegram_bot.py         # Bot application setup, 13 command handlers + 3 message handlers
-|   +-- handlers.py             # 13 command handlers + 3 message handlers, resource guards, streaming status
+|   |-- telegram_bot.py         # Bot application setup, 16 command handlers + 3 message handlers
+|   +-- handlers.py             # 16 command handlers + 3 message handlers, resource guards, streaming status
 |
 |-- brain/                      # LangGraph agent pipeline
 |   |-- __init__.py
-|   |-- state.py                # AgentState TypedDict (21 fields)
+|   |-- state.py                # AgentState TypedDict (23 fields)
 |   |-- graph.py                # StateGraph wiring, stage tracking, run_task()
 |   +-- nodes/                  # Individual pipeline stages
 |       |-- __init__.py
 |       |-- classifier.py       # Task type detection (code/data/file/automation/project)
 |       |-- planner.py          # Plan generation with TDD assertions + project mode
 |       |-- executor.py         # Code gen + sandbox exec OR shell exec for projects
-|       |-- auditor.py          # Cross-model adversarial quality review (Opus)
-|       +-- deliverer.py        # Response formatting for Telegram
+|       |-- auditor.py          # Cross-model adversarial quality review (Opus) + visual check
+|       +-- deliverer.py        # Response formatting, deployment, memory extraction
 |
 |-- tools/                      # Shared utilities
 |   |-- __init__.py
 |   |-- claude_client.py        # Anthropic SDK wrapper with retry, usage tracking
-|   |-- sandbox.py              # Subprocess execution: run_code() + run_shell()
+|   |-- sandbox.py              # Subprocess execution: run_code() + run_shell() + server management
+|   |-- deployer.py             # Static deployment: GitHub Pages, Vercel, Firebase Hosting
+|   |-- visual_check.py         # Playwright headless visual verification
 |   |-- file_manager.py         # File I/O, uploads, workspace management
 |   |-- projects.py             # Project registry loader, trigger matcher
 |   +-- model_router.py        # Claude/Ollama routing with budget escalation
@@ -165,17 +168,21 @@ AgentSutra/
 |   |-- __init__.py
 |   +-- cron.py                 # APScheduler with SQLite-backed job store
 |
-|-- tests/                      # 527+ automated tests (v6.2+)
+|-- tests/                      # 561+ automated tests (v8.4)
 |   |-- __init__.py
 |   |-- test_sandbox.py         # 174 tests: blocked patterns (30), allowed cmds (13), working dir (4), pip mapping (6), import parsing (7), interpreter blocking (7), find blocking (5), encoding bypass (3), home move blocking (4), dotfile protection (9), env filtering (6), traceback extraction (4), pipe-to-shell (6), eval (2), bash string splitting (4), code scanner (14), file detection (6), artifact filter (26), walk artifacts (6), artifact sanity check (3), stdout fallback (7), stdin devnull (2)
 |   |-- test_executor.py        # 34 tests: markdown extraction (10), timeout estimation (4), param extraction (4), import error parsing (12), dependency bootstrapping (4)
 |   |-- test_docker_sandbox.py  # 28 tests: Docker availability (8), command building (7), routing (3), execution integration (6), security integration (4)
 |   |-- test_handlers.py        # 27 tests: auth (4), resource guards (5), message splitting (5), file upload (4), artifact delivery (2), scheduled timeout (1), error sanitization (5), rate limit retry (1)
+|   |-- test_deployer.py        # 25 tests: GitHub Pages (10), Vercel (7), Firebase (8) — credential safety, config lifecycle, routing
 |   |-- test_auditor.py         # 22 tests: JSON extraction (12), environment error detection (10)
 |   |-- test_budget.py          # 13 tests: budget enforcement (2), model costs (3), thinking tokens (5), API retries (3)
 |   |-- test_file_manager.py    # 12 tests: CSV metadata, empty files, truncation, UUID uploads
+|   |-- test_deployer_integration.py  # 8 tests: deploy routing integration, auto-deploy on audit pass
 |   |-- test_db.py              # 8 tests: prune_old_data epoch handling (3), crash recovery (3), task pruning (2)
 |   |-- test_e2e_artifact_delivery.py  # 8 tests: realistic project execution with artifact detection
+|   |-- test_server_integration.py    # 4 tests: server start/stop/list integration
+|   |-- test_visual_check.py   # 5 tests: Playwright success, no-playwright graceful skip, timeout, console errors, auditor integration
 |   |-- test_classifier.py      # 5 tests: fallback ordering (imports _FALLBACK_ORDER from source)
 |   |-- test_pipeline_integration.py  # 5 tests: full pipeline with mocked Claude API
 |   |-- test_v8_foundation.py  # 17 tests: timeout detection (7), blocklist audit (6), coding standards injection (4)
@@ -219,6 +226,9 @@ AgentSutra/
 - All timeouts, limits, and model names configurable via environment variables
 - Computes `MAX_FILE_SIZE_BYTES` from `MAX_FILE_SIZE_MB` for use in file validation
 - Sets `TELEGRAM_MAX_MESSAGE_LENGTH = 4096` (Telegram API hard limit)
+- **Deployment config (v8.1+):** `DEPLOY_ENABLED`, `DEPLOY_PROVIDER` (github_pages/vercel/firebase), `DEPLOY_REPO`, `DEPLOY_GITHUB_TOKEN`, `DEPLOY_VERCEL_TOKEN`, `DEPLOY_BASE_URL`, `DEPLOY_FIREBASE_PROJECT`, `DEPLOY_FIREBASE_TOKEN`
+- **Server config (v8.2):** `SERVER_START_TIMEOUT`, `SERVER_MAX_LIFETIME`, `SERVER_PORT_RANGE_START`, `SERVER_PORT_RANGE_END`
+- **Visual check config (v8.3):** `VISUAL_CHECK_ENABLED`, `VISUAL_CHECK_TIMEOUT`
 
 ### `projects.yaml` - Project Registry (v2)
 - YAML file defining 8 registered projects the agent can invoke instead of writing code from scratch
@@ -228,15 +238,15 @@ AgentSutra/
 
 ### `bot/telegram_bot.py` - Bot Setup
 - Creates `ApplicationBuilder` with bot token from config
-- Registers 11 command handlers: `/start`, `/status`, `/history`, `/usage`, `/cost`, `/health`, `/exec`, `/context`, `/cancel`, `/projects`, `/schedule`
+- Registers 16 command handlers: `/start`, `/status`, `/history`, `/usage`, `/cost`, `/health`, `/exec`, `/context`, `/cancel`, `/projects`, `/schedule`, `/chain`, `/debug`, `/deploy`, `/servers`, `/stopserver`
 - Registers file handlers (Document, Photo) before text handler to ensure proper routing
 - Text handler is catch-all for non-command messages via `filters.TEXT & ~filters.COMMAND`
 
-### `bot/handlers.py` - Request Handling (v6.2: resource guards, rate limiter)
+### `bot/handlers.py` - Request Handling (v6.2+: resource guards, rate limiter, v8 commands)
 - `auth_required` decorator: wraps every handler, rejects Telegram users not in `ALLOWED_USER_IDS`, uses `@functools.wraps` for proper function metadata
 - `STAGE_LABELS` dict: maps internal stage names to user-friendly streaming status messages
 - **`_check_resources()` (v6.2):** checks RAM usage via `psutil` and active task count before launching pipeline. Returns rejection message or None.
-- `cmd_start`: sends welcome message listing capabilities and all 11 slash commands
+- `cmd_start`: sends welcome message listing capabilities and all 16 slash commands
 - `cmd_status`: iterates `running_tasks` dict (v2: multiple concurrent tasks), shows stage for each via `get_stage()`
 - `cmd_history`: queries last 5 tasks from DB, shows status indicators (done/err/stop/...)
 - `cmd_usage`: displays session token counts from `claude_client.get_usage_summary()`
@@ -246,7 +256,12 @@ AgentSutra/
 - `cmd_context`: views recent conversation history (last 8 messages) and stored context; `/context clear` deletes all memory
 - `cmd_cancel`: iterates all running task futures, calls `.cancel()` on each, updates DB status, clears stage tracking -- v2: handles multiple concurrent tasks
 - `cmd_projects` (v2): imports and calls `get_projects()`, displays each project's name, commands, and top 3 triggers
-- `cmd_schedule` (v2): parses `/schedule <minutes> <task>` format; subcommands: `list` (show all jobs), `remove <id>` (cancel job by partial ID prefix match); creates interval job via `add_interval_job()` using a module-level `_scheduled_task_run()` function (not a closure) so APScheduler's SQLAlchemyJobStore can pickle it for persistence
+- `cmd_schedule` (v2): parses `/schedule <minutes> <task>` format; subcommands: `list` (show all jobs), `remove <id>` (cancel job by partial ID prefix match); creates interval job via `add_interval_job()` using a module-level `_scheduled_task_run()` function (not a closure) so APScheduler's SQLAlchemyJobStore can serialize it for persistence
+- **`cmd_chain` (v8.0):** parses `/chain step 1 -> step 2 -> step 3` with strict-AND semantics. Failed step halts chain. `{output}` passes artifacts between steps.
+- **`cmd_debug` (v8.0):** per-task debug JSON — timings, verdict, retries, server/deploy URLs
+- **`cmd_deploy` (v8.1):** manually deploy a task's frontend artifacts to configured provider
+- **`cmd_servers` (v8.2):** list running local preview servers (port, PID, uptime)
+- **`cmd_stopserver` (v8.2):** stop a server by task ID or stop all (`/stopserver all`)
 - `_scheduled_task_run()`: module-level async function that creates a fresh `Bot` instance from `config.TELEGRAM_BOT_TOKEN`, runs the full pipeline via `run_task()`, and sends results + artifacts to the originating chat. Accepts only serializable kwargs (`chat_id`, `user_id`, `task_message`). **v6.2:** checks RAM threshold before running, skips with warning if memory pressure. **v6.7:** wrapped in `asyncio.wait_for(timeout=LONG_TIMEOUT)` to prevent indefinite hangs.
 - `handle_message`: **v6.2:** enforces 5-second per-user rate limit and resource guards before pipeline launch. Creates DB record --> sends initial status message --> launches pipeline via `asyncio.to_thread()` --> streams stage updates by polling `get_stage()` every 3 seconds and editing the status message --> on completion, sends response text + artifact files --> updates DB with result
 - `handle_document`: validates file size against `MAX_FILE_SIZE_BYTES`, downloads, saves via `save_upload()`, appends path to `pending_files` in user context, prompts user for instructions
@@ -254,7 +269,7 @@ AgentSutra/
 - `_send_long_message`: splits text at line boundaries respecting Telegram's 4096-char limit, hard-splits individual lines that exceed the limit
 
 ### `brain/state.py` - State Definition
-- `AgentState(TypedDict)` with 20 fields across 9 groups:
+- `AgentState(TypedDict)` with 23 fields across 10 groups:
   - **Input:** `task_id` (str), `user_id` (int), `message` (str), `files` (list of paths)
   - **Classification:** `task_type` (str: "code" | "data" | "file" | "automation" | "project" | "ui_design" | "frontend")
   - **Project (v2):** `project_name` (str), `project_config` (dict from projects.yaml)
@@ -264,7 +279,8 @@ AgentSutra/
   - **Control:** `retry_count` (int), `stage` (str, for streaming status)
   - **Parameters:** `extracted_params` (dict), `working_dir` (str)
   - **Context:** `conversation_context` (str, recent history for planner), `auto_installed_packages` (list)
-  - **Output:** `final_response` (str), `artifacts` (list of file paths)
+  - **Timing (v8.0):** `stage_timings` (dict, per-stage duration in seconds)
+  - **Output:** `final_response` (str), `artifacts` (list of file paths), `server_url` (str, v8.2), `deploy_url` (str, v8.1)
 
 ### `brain/graph.py` - LangGraph Pipeline
 - Thread-safe stage tracking via `_task_stages` dict protected by `threading.Lock` -- enables real-time streaming status to Telegram from the worker thread
@@ -273,7 +289,7 @@ AgentSutra/
 - `build_graph()`: creates `StateGraph(AgentState)`, adds 5 nodes (classify, plan, execute, audit, deliver) with stage tracking wrappers, wires edges including conditional retry routing
 - `should_retry()`: after audit, returns "deliver" if pass or max retries reached, "plan" otherwise
 - `agent_graph`: module-level compiled graph singleton (built once at import)
-- `run_task()`: populates initial state with all 20 fields defaulted, invokes the compiled graph, clears stage tracking in `finally` block
+- `run_task()`: populates initial state with all 23 fields defaulted (including `stage_timings`, `server_url`, `deploy_url`), invokes the compiled graph, clears stage tracking in `finally` block
 
 ### `brain/nodes/classifier.py` - Task Classification (v2: project-aware)
 - **Fast path (v2):** calls `match_project()` first to check for trigger keyword matches before calling Claude; if matched, immediately returns `task_type: "project"` with project config -- no API call needed
@@ -284,11 +300,15 @@ AgentSutra/
 - Uses minimal tokens (max_tokens=200) for fast classification
 - If Claude classifies as "project" but fast path missed it, does a second `match_project()` call
 
-### `brain/nodes/planner.py` - Plan Generation (v2: TDD + project mode)
+### `brain/nodes/planner.py` - Plan Generation (v2 + v8: TDD, project mode, memory, file injection, security)
 - **TDD_INSTRUCTION (v2):** constant appended to all non-project system prompts, instructs Claude to write `assert` statements that verify correctness -- data tasks assert row counts and column names, code tasks include at least 2 assertions, file tasks assert output exists, all end with "ALL ASSERTIONS PASSED"
 - **CAPABILITIES_BLOCK:** shared system capabilities injected into all planner prompts (internet, runtime installs, Ollama, filesystem, shell, big data rules). Braces in code examples are escaped for `.format()` compatibility.
 - **PROJECT_SYSTEM (v2):** dedicated system prompt for project tasks -- injects full project context (name, path, description, commands, timeout) via `get_project_context()`, explicitly instructs Claude to use existing commands instead of writing new code
 - 6 additional task-type-specific system prompts: CODE_SYSTEM, DATA_SYSTEM, FILE_SYSTEM, AUTOMATION_SYSTEM, UI_DESIGN_SYSTEM, FRONTEND_SYSTEM -- each includes the TDD instruction + CAPABILITIES_BLOCK
+- **SECURITY RESTRICTIONS block (v8.0.2):** injected into planner prompt — instructs LLM to refuse system credential file tasks instead of generating synthetic data
+- **Coding standards injection (v8.0):** injects project-specific coding standards into the plan prompt when available
+- **Cross-task memory injection (v8.0):** queries `project_memory` DB for relevant success/failure patterns and injects them into the planner prompt as "lessons learned"
+- **Dynamic file injection (v8.0):** `_inject_project_files()` samples up to `MAX_FILE_INJECT_COUNT` (50) source files from the project directory, with path traversal validation via `.resolve() + startswith()` (v8.0.2 fix)
 - Includes file contents for context (max 10K chars per file); large data files get metadata-only treatment
 - On retry: appends audit feedback + previous execution output (up to 3K chars) to prompt, asks for revised plan
 
@@ -301,16 +321,17 @@ AgentSutra/
 - `_format_result()` (v2): formats `ExecutionResult` with full traceback injection -- if execution failed, the exact Python traceback (with file names and line numbers) is included, enabling the retry loop to fix the precise error
 - Both paths guard against empty code generation
 
-### `brain/nodes/auditor.py` - Quality Verification (v2 + v6.5: cross-model adversarial review, fail-safe defaults)
+### `brain/nodes/auditor.py` - Quality Verification (v2 + v6.5 + v8.3: cross-model adversarial review, fail-safe defaults, visual check)
 - **Cross-model auditing (v2):** executor uses `DEFAULT_MODEL` (Sonnet), auditor uses `COMPLEX_MODEL` (Opus) -- a different, more capable model reviews the work of the generating model, preventing the "echo chamber" effect where the same model approves its own output
 - Strict evaluation criteria: checks exit code, assertion results (looks for "ALL ASSERTIONS PASSED"), traceback presence, output correctness, completeness
 - v2: project-specific audit criteria -- checks that project commands actually ran and produced expected output
+- **Visual verification (v8.3):** For frontend/ui_design tasks with a `server_url`, imports `tools.visual_check.check_page()` and appends visual context (loads, HTTP status, console errors) to the audit prompt before calling Opus. Gracefully skips on error.
 - Returns JSON `{"verdict": "pass"|"fail", "feedback": "..."}` with `_extract_json()` fallback for malformed responses
 - **Fail-safe defaults (v6.5):** missing verdict key defaults to `"fail"` (not `"pass"`), preventing broken output from being delivered. `retry_count` increments for ANY non-"pass" verdict (not just "fail"), preventing infinite retry loops from unexpected verdict values like `"partial"` or `"retry"`.
 - On non-pass: increments `retry_count`; graph routes back to planner
 - Uses `temperature=0.0` for deterministic auditing
 
-### `brain/nodes/deliverer.py` - Response Formatting
+### `brain/nodes/deliverer.py` - Response Formatting (v7 + v8: memory, deployment, screenshots)
 - Formats final text response based on task type and audit verdict
 - Project tasks (v2): shows project name in success message ("Project 'X' executed successfully.")
 - Code tasks: includes code in backtick blocks (truncated at 3500 chars with note about attached file)
@@ -318,6 +339,10 @@ AgentSutra/
 - **Honest failure reporting (v7):** When verdict is FAIL, the deliverer injects hard constraints into the summary prompt — "This task FAILED. Do NOT claim files were created unless listed." Prevents Claude from fabricating success narratives based on the plan
 - Failed tasks: clearly state what failed, include audit feedback, and never claim artifacts were generated unless they actually exist
 - Lists artifact file count and names for attachment
+- **Cross-task memory (v8.0):** Extracts success/failure patterns from execution results and stores them in `project_memory` DB table for future planner injection. Mines temporal sequences for recurring task patterns.
+- **Screenshot attachment (v8.3):** Attaches `preview.png` screenshot to artifacts when visual check is enabled and server was running
+- **Auto-deployment (v8.1):** For frontend/ui_design tasks that pass audit, calls `deployer.deploy()` to publish to the configured provider. Stores `deploy_url` in state.
+- **Debug sidecar (v8.0):** Builds per-task debug JSON (timings, verdict, retries, server_url, deploy_url) for `/debug` command
 
 ### `tools/claude_client.py` - Claude API Wrapper
 - Lazy client initialization via `_get_client()` -- only creates `Anthropic` client on first API call
@@ -339,7 +364,7 @@ AgentSutra/
 
 ### `tools/sandbox.py` - Code Execution (v2 + v6.2 + v6.3 + v6.4 + v6.5 + v6.6: shell mode, traceback extraction, expanded safety, Docker isolation, process group kill, code scanner)
 - `ExecutionResult` dataclass: `success`, `stdout`, `stderr`, `traceback` (v2), `files_created`, `timed_out`, `return_code`, `auto_installed` (v6.3)
-- **Command blocklist (v6.6, 34 patterns):** `_BLOCKED_PATTERNS` checks all commands before execution. Patterns include: `rm -rf` (root/home/critical dirs), `mkfs`, `dd if=`, `shutdown/reboot/halt/poweroff`, `fork bomb`, `sudo`, `curl|sh`, `curl|bash`, `wget|sh`, `wget|bash`, `chmod 777/a+rwx`, interpreter inline execution (`python -c`, `perl -e`, `ruby -e`, `node -e`), destructive find (`-delete`, `-exec rm`), base64 decode piped to shell, home directory relocation (`mv ~/`), dotfile write/append redirects (`.bashrc`, `.ssh`, `.gitconfig`, etc.), symlink attacks on dotfiles, printf/echo piped to shell, eval with command substitution, bash/sh -c string splitting. Blocked commands return failure with security warning.
+- **Command blocklist (v6.6+, 39 patterns):** `_BLOCKED_PATTERNS` checks all commands before execution. Patterns include: `rm -rf` (root/home/critical dirs), `mkfs`, `dd if=`, `shutdown/reboot/halt/poweroff`, `fork bomb`, `sudo`, `curl|sh`, `curl|bash`, `wget|sh`, `wget|bash`, `chmod 777/a+rwx`, interpreter inline execution (`python -c`, `perl -e`, `ruby -e`, `node -e`), destructive find (`-delete`, `-exec rm`), base64 decode piped to shell, home directory relocation (`mv ~/`), dotfile write/append redirects (`.bashrc`, `.ssh`, `.gitconfig`, etc.), symlink attacks on dotfiles, printf/echo piped to shell, eval with command substitution, bash/sh -c string splitting. Blocked commands return failure with security warning.
 - **Code content scanner (v6.6):** `_check_code_safety()` scans Python code content before subprocess execution. Blocks credential file reads (`~/.ssh/`, `~/.gnupg/`, `.env`, PEM, id_rsa), `os.system()`, `shutil.rmtree(~/root)`, raw socket connections, `/etc/passwd|shadow` reads. Not applied in Docker mode. Defense-in-depth, not a security boundary.
 - **Audit logging (v6.6, 12 patterns):** `_LOGGED_PATTERNS` records file deletion, permission changes, git push, service management, network downloads, pip install from URL, find commands, symlink operations, file moves, python inline execution, eval commands, and printf pipes for review.
 - **`_filter_env()` (v6.3):** shared helper that builds a safe subprocess environment by stripping exact-match keys (`PROTECTED_ENV_KEYS`) and pattern-match keys (vars containing KEY, TOKEN, SECRET, PASSWORD, CREDENTIAL via `PROTECTED_ENV_SUBSTRINGS`). Used by both `run_code()` and `run_shell()`.
@@ -349,6 +374,7 @@ AgentSutra/
 - `run_shell()` (v2): executes shell commands for project invocations; supports venv activation (prepends `source <venv>/bin/activate` to command), custom working directories, custom environment variables; builds full command with `&&` chaining; uses `start_new_session=True` with process group kill on timeout (v6.5); also detects new files and extracts tracebacks
 - `_extract_traceback()` (v2): parses stderr to find the last "Traceback (most recent call last):" block and returns everything from there to the end -- provides exact file names, line numbers, and exception messages to the retry loop
 - stdout capped at 50K chars, stderr at 20K chars to prevent memory exhaustion
+- **Server management (v8.2):** Thread-safe server registry with `start_server()`, `stop_server()`, `stop_all_servers()`, `list_servers()`. Port allocation from configurable range (8100-8120), HTTP polling for readiness, auto-kill timer via `threading.Timer`. Executor auto-starts `python3 -m http.server` for frontend/ui_design tasks after HTML generation.
 
 ### `tools/projects.py` - Project Registry (v2)
 - `load_projects()`: reads `projects.yaml` via `yaml.safe_load()`, caches in module-level `_projects` list
@@ -365,6 +391,22 @@ AgentSutra/
 - `_get_today_spend()` queries `api_usage` table for today's total cost (UTC midnight cutoff)
 - Ollama fallback: if Ollama call fails, transparently falls back to Claude Sonnet with a warning log
 - `_ollama_available()` checks Ollama API with 2-second timeout; `_ram_below_threshold()` uses psutil
+
+### `tools/deployer.py` - Static Deployment (v8.1 + v8.4)
+- Module for deploying generated frontend artifacts to live URLs
+- `deploy(output_dir, project_name)`: main entry point — routes to provider-specific function based on `config.DEPLOY_PROVIDER`
+- **GitHub Pages (v8.1):** `_deploy_github_pages()` — uses `gh` CLI to push to a dedicated repo's branch. Requires `DEPLOY_REPO` and `DEPLOY_GITHUB_TOKEN`.
+- **Vercel (v8.1):** `_deploy_vercel()` — uses `vercel` CLI with `--prod` flag and `--token`. Requires `DEPLOY_VERCEL_TOKEN`.
+- **Firebase Hosting (v8.4):** `_deploy_firebase()` — creates a temporary `firebase.json` hosting config, runs `firebase deploy --only hosting` with `--token`. Uses `try/finally` to clean up `firebase.json` after deployment. Requires `DEPLOY_FIREBASE_PROJECT` and `DEPLOY_FIREBASE_TOKEN`.
+- All providers: validate required credentials, raise `ValueError` on missing config, return the deployed URL
+- Credential safety: `DEPLOY_FIREBASE_TOKEN` is stripped from subprocess env via `PROTECTED_ENV_SUBSTRINGS` containing "TOKEN"
+
+### `tools/visual_check.py` - Playwright Visual Verification (v8.3)
+- `VisualCheckResult` dataclass: `checked`, `loads`, `status_code`, `console_errors`, `screenshot_path`, `error`
+- `check_page(url, screenshot_dir, timeout)`: launches headless Chromium via Playwright, navigates to URL, captures console errors via callback, takes full-page screenshot, returns structured result
+- **Graceful degradation:** imports `playwright.sync_api` inside the function — if Playwright is not installed, returns `VisualCheckResult(checked=False)` with no crash
+- Handles `TimeoutError` and general exceptions, always returns a result (never raises)
+- Used by `auditor.py` to inject visual context into the Opus audit prompt
 
 ### `tools/file_manager.py` - File Operations
 - `save_upload()`: validates against `MAX_FILE_SIZE_BYTES`, saves bytes to uploads dir with UUID-based unique filenames (`{stem}_{uuid4_hex8}{suffix}`) to prevent TOCTOU race conditions (v6.7)
@@ -603,7 +645,7 @@ Default model: claude-sonnet-4-6
 Workspace: /Users/you/Desktop/AgentSutra/workspace
 Database initialized at /Users/you/Desktop/AgentSutra/storage/agentsutra.db
 Projects registered: 8
-Telegram bot configured with 11 command handlers
+Telegram bot configured with 16 command handlers
 Scheduler started (0 persisted jobs loaded)
 Starting Telegram bot (polling mode)...
 Send /start to your bot to begin
@@ -891,6 +933,20 @@ All variables are set in `.env` and loaded by `config.py` at import time.
 | `DOCKER_CPU_LIMIT` | `2` | No | Max CPU cores per container (v6.4) |
 | `DOCKER_NETWORK` | `bridge` | No | Container network mode: `bridge` (full) or `none` (airgapped) (v6.4) |
 | `MAX_FILE_INJECT_COUNT` | `50` | No | Max project source files before skipping dynamic file injection (v8.0) |
+| `DEPLOY_ENABLED` | `false` | No | Enable static deployment for generated frontends (v8.1) |
+| `DEPLOY_PROVIDER` | `github_pages` | No | Deployment provider: `github_pages`, `vercel`, or `firebase` (v8.1) |
+| `DEPLOY_REPO` | -- | No | GitHub repo for Pages deployment (e.g., `user/deployed-sites`) (v8.1) |
+| `DEPLOY_GITHUB_TOKEN` | -- | No | GitHub token for Pages deployment (v8.1) |
+| `DEPLOY_VERCEL_TOKEN` | -- | No | Vercel token for deployment (v8.1) |
+| `DEPLOY_BASE_URL` | -- | No | Base URL for deployed sites (v8.1) |
+| `DEPLOY_FIREBASE_PROJECT` | -- | No | Firebase project ID for Hosting deployment (v8.4) |
+| `DEPLOY_FIREBASE_TOKEN` | -- | No | Firebase CI token for deployment (v8.4) |
+| `SERVER_START_TIMEOUT` | `30` | No | Seconds to wait for local server to respond (v8.2) |
+| `SERVER_MAX_LIFETIME` | `300` | No | Auto-kill preview servers after this many seconds (v8.2) |
+| `SERVER_PORT_RANGE_START` | `8100` | No | Start of port range for local servers (v8.2) |
+| `SERVER_PORT_RANGE_END` | `8120` | No | End of port range for local servers (v8.2) |
+| `VISUAL_CHECK_ENABLED` | `false` | No | Enable Playwright headless visual verification (v8.3) |
+| `VISUAL_CHECK_TIMEOUT` | `15` | No | Seconds for Playwright page load timeout (v8.3) |
 
 ### Derived Constants (not configurable via .env)
 
@@ -904,7 +960,7 @@ All variables are set in `.env` and loaded by `config.py` at import time.
 | `DB_PATH` | `BASE_DIR/storage/agentsutra.db` | Hardcoded |
 | `HOST_HOME` | User's home directory | `Path.home()` |
 | `PROTECTED_ENV_KEYS` | `{ANTHROPIC_API_KEY, TELEGRAM_BOT_TOKEN}` | Hardcoded, stripped from subprocess env (exact match) |
-| `PROTECTED_ENV_SUBSTRINGS` | `{KEY, TOKEN, SECRET, PASSWORD, CREDENTIAL}` | Hardcoded, any env var whose name contains these substrings is stripped (v6.3) |
+| `PROTECTED_ENV_SUBSTRINGS` | `{KEY, TOKEN, SECRET, PASSWORD, CREDENTIAL, DATABASE, AUTH}` | Hardcoded, any env var whose name contains these substrings is stripped (v6.3+) |
 | `DOCKER_PIP_CACHE` | `WORKSPACE_DIR/.pip-cache` | Persistent pip cache shared across Docker containers (v6.4) |
 | `MAX_FILE_SIZE_BYTES` | `MAX_FILE_SIZE_MB * 1024 * 1024` | Computed |
 | `TELEGRAM_MAX_MESSAGE_LENGTH` | `4096` | Telegram API limit |
@@ -935,12 +991,14 @@ Two classification paths:
 
 2. **Slow path:** Sends the message to Claude with a system prompt listing all 5 categories and a summary of all registered projects. Claude returns JSON `{"task_type": "...", "reason": "..."}`. Falls back to keyword scanning if JSON parsing fails.
 
-Categories:
+Categories (7 task types):
 - `project` -- matches a registered project (invoke existing code)
 - `code` -- write new scripts, apps, websites, APIs, bug fixes
 - `data` -- CSV/Excel analysis, charts, summaries
 - `file` -- file conversion, transformation, reformatting
 - `automation` -- web scraping, scheduled reports, monitoring
+- `ui_design` -- visual design mockups, UI components
+- `frontend` -- production web apps, HTML/CSS/JS frontends
 
 ### Stage 2: Plan
 
@@ -997,6 +1055,7 @@ Strict evaluation:
 4. Any tracebacks or errors in stderr?
 5. For projects: did the command actually produce expected output?
 6. Is output complete, not truncated?
+7. **Visual verification (v8.3):** For frontend/ui_design tasks with a `server_url`, runs Playwright headless check and appends results (page loads, HTTP status, console errors) to the audit prompt before Opus review
 
 Returns JSON verdict:
 - `"pass"` --> route to deliver
@@ -1016,6 +1075,10 @@ Generates a polished Telegram-ready summary via Claude:
 - Falls back to template-based formatting if Claude call fails
 - Saves generated code as `.py` file artifact for attachment
 - Appends file list at the bottom if not already mentioned in summary
+- **Cross-task memory (v8.0):** extracts success/failure patterns and stores in `project_memory` for future planner injection
+- **Auto-deployment (v8.1):** for frontend/ui_design tasks that pass audit, deploys artifacts to configured provider and stores `deploy_url` in state
+- **Screenshot attachment (v8.3):** attaches Playwright `preview.png` to artifacts when visual check was enabled
+- **Debug sidecar (v8.0):** builds per-task debug JSON with timings, verdict, retries, server_url, deploy_url
 
 ### Pipeline Cost Summary
 
@@ -1026,6 +1089,7 @@ Generates a polished Telegram-ready summary via Claude:
 | Code task (no retry) | 5 | Sonnet (classify, plan, execute, deliver) + Opus (audit) |
 | Any task with 1 retry | +3 | Sonnet (plan, execute) + Opus (audit) per retry |
 | Any task with max retries (3) | up to 14 | Sonnet + Opus per iteration, Sonnet deliver at end |
+| Frontend task with deploy | +0 (no extra Claude calls) | Deploy uses CLI subprocess, not LLM |
 
 ---
 
@@ -1044,6 +1108,11 @@ Generates a polished Telegram-ready summary via Claude:
 | `/cancel` | Cancel all running tasks (v2: cancels multiple), updates DB status | `/cancel` --> "Cancelled 2 task(s)." |
 | `/projects` | List all registered projects with their commands and triggers (v2) | `/projects` --> "Affiliate Job Scraper (scrape, export, stats)..." |
 | `/schedule` | Schedule recurring tasks, list scheduled tasks, or remove them (v2) | See below |
+| `/chain` | Execute strict-AND task chain with artifact passing (v8.0) | `/chain Scrape jobs -> Analyze results -> Send report` |
+| `/debug` | Per-task debug JSON: timings, verdict, retries, server/deploy URLs (v8.0) | `/debug a1b2c3d4` |
+| `/deploy` | Manually deploy a task's frontend artifacts to configured provider (v8.1) | `/deploy a1b2c3d4` |
+| `/servers` | List running local preview servers with port, PID, uptime (v8.2) | `/servers` |
+| `/stopserver` | Stop a local server by task ID or stop all (v8.2) | `/stopserver a1b2c3d4` or `/stopserver all` |
 
 ### /schedule Subcommands
 
@@ -1447,14 +1516,14 @@ This requires ~30 lines of code changes across 2 files.
 - Generated code runs in `subprocess.run()` with hard timeout (default 60s, configurable)
 - Working directory for generated code is restricted to `workspace/outputs/`
 - Project commands run in their own directories with configurable timeout (up to 900s)
-- stdout capped at 10K chars, stderr at 5K chars to prevent memory exhaustion
+- stdout capped at 50K chars, stderr at 20K chars to prevent memory exhaustion
 - Temp scripts are deleted in `finally` blocks
 - **Docker isolation (v6.4, optional):** When `DOCKER_ENABLED=true`, `run_code()` executes LLM-generated code inside Docker containers. Only `workspace/outputs/` (read-write) and `workspace/uploads/` (read-only) are mounted. The host filesystem, SSH keys, `.env`, and all other files are completely inaccessible from inside the container. Resource limits (memory, CPU) and network mode (`bridge`/`none`) are configurable. Falls back to subprocess execution if Docker is unavailable. Without Docker, code has full user-level filesystem access — the regex blocklist and Opus auditor are the only barriers.
 - **Network isolation advisory (v6.5):** Default `DOCKER_NETWORK=bridge` allows containers to access the internet (required for web scraping, API calls, `pip install`). For tasks processing sensitive internal data, set `DOCKER_NETWORK=none` to guarantee an airgapped execution environment where no network exfiltration is possible. This is a per-deployment risk decision — most tasks require `bridge`.
 
 ### Shell Execution (v2 + v6.2 + v6.3 + v6.6)
 - `run_shell()` executes commands with `shell=True` -- necessary for venv activation and command chaining
-- **Command blocklist (v6.6, 34 patterns):** Before execution, commands are checked against 34 destructive patterns covering: filesystem destruction (`rm -rf`, `mkfs`, `dd`), system power (`shutdown`, `reboot`, `halt`, `poweroff`), privilege escalation (`sudo`), pipe-to-shell attacks (`curl|sh`, `wget|bash`, `printf|sh`, `echo|bash`), permission destruction (`chmod 777/a+rwx`), interpreter bypass (`python -c`, `perl -e`, `ruby -e`, `node -e`), destructive find (`-delete`, `-exec rm`), encoding bypass (`base64|bash`), home directory relocation (`mv ~/`), dotfile corruption (write/append redirects to `.bashrc`, `.ssh`, `.gitconfig`, etc.), symlink attacks on dotfiles, eval with command substitution, and bash/sh -c string splitting. Blocked commands are rejected with a security warning.
+- **Command blocklist (v6.6+, 39 patterns):** Before execution, commands are checked against 34 destructive patterns covering: filesystem destruction (`rm -rf`, `mkfs`, `dd`), system power (`shutdown`, `reboot`, `halt`, `poweroff`), privilege escalation (`sudo`), pipe-to-shell attacks (`curl|sh`, `wget|bash`, `printf|sh`, `echo|bash`), permission destruction (`chmod 777/a+rwx`), interpreter bypass (`python -c`, `perl -e`, `ruby -e`, `node -e`), destructive find (`-delete`, `-exec rm`), encoding bypass (`base64|bash`), home directory relocation (`mv ~/`), dotfile corruption (write/append redirects to `.bashrc`, `.ssh`, `.gitconfig`, etc.), symlink attacks on dotfiles, eval with command substitution, and bash/sh -c string splitting. Blocked commands are rejected with a security warning.
 - **Code content scanner (v6.6):** In subprocess mode (non-Docker), Python code is scanned for dangerous operations before execution — credential file reads, `os.system()`, `shutil.rmtree()` on home/root, raw socket connections, and system file reads. Defense-in-depth, not a security boundary.
 - **Audit logging (v6.6, 12 patterns):** file deletion, permission changes, git push, service management, network downloads, pip install from URL, find commands, symlink operations, file moves, python inline execution, eval commands, and printf pipes are logged for review even when allowed.
 - **Environment filtering (v6.3):** `_filter_env()` strips credentials from subprocess environment using both exact-match keys (`ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`) and pattern-based matching (any var containing KEY, TOKEN, SECRET, PASSWORD, or CREDENTIAL in its name). Safe env vars (`PATH`, `HOME`, `SHELL`, `LANG`, etc.) are preserved.
@@ -1476,6 +1545,12 @@ This requires ~30 lines of code changes across 2 files.
 - Telegram messages transit through Telegram's servers (encrypted in transit)
 - API prompts and task content are sent to Anthropic's servers (see their data retention policy)
 - No telemetry, no analytics, no external logging
+
+### Deployment Security (v8.1+)
+- Deployment credentials (`DEPLOY_GITHUB_TOKEN`, `DEPLOY_VERCEL_TOKEN`, `DEPLOY_FIREBASE_TOKEN`) are loaded from `.env` and never logged
+- `DEPLOY_FIREBASE_TOKEN` is automatically stripped from subprocess environment via `PROTECTED_ENV_SUBSTRINGS` matching "TOKEN"
+- Firebase deployment creates a temporary `firebase.json` config and cleans it up in a `try/finally` block
+- All deployment providers validate required credentials before attempting any subprocess calls
 
 ### Secret Management
 - API keys stored in `.env` file -- never committed to git
@@ -1575,7 +1650,7 @@ AgentSutra was independently stress-tested using a 4-category evaluation protoco
 |----------|--------|-------|
 | Orchestration | 9.5/10 | Complex scientific math + multi-source data retrieval |
 | Safety | 9.0/10 | Refusal logic robust; adversarial audit (Opus) caught high-risk patterns |
-| Code Maturity | 9.2/10 | 287 tests + comprehensive documentation = production-ready |
+| Code Maturity | 9.2/10 | 561+ tests + comprehensive documentation = production-ready |
 | Innovation | 8.5/10 | Adversarial Audit + God Mode focus is a distinct, valuable niche |
 
 ---

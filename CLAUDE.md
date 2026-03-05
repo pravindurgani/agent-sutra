@@ -3,7 +3,7 @@
 Single-user, self-hosted AI agent. Telegram-controlled. Mac Mini M2 (16GB).
 Fixed 5-stage LangGraph pipeline: Classify → Plan → Execute → Audit → Deliver.
 Cross-model adversarial auditing: Sonnet generates, Opus reviews.
-~5,500 LOC across 18 source files. ~8,000 LOC tests across 22 files. 586 test functions (561 passing, 25 skipped/Docker).
+~5,500 LOC across 20 source files. ~8,000 LOC tests across 22 files. 586 test functions (561 passing, 25 skipped/Docker).
 
 ## Architecture
 
@@ -18,25 +18,26 @@ Cross-model adversarial auditing: Sonnet generates, Opus reviews.
 ### File Map
 | File | Lines | Purpose |
 |------|------:|---------|
-| `main.py` | 149 | Entry point: env validation, DB init, crash recovery, bot start |
+| `main.py` | 148 | Entry point: env validation, DB init, crash recovery, bot start |
 | `config.py` | 115 | All constants, paths, model names, timeouts, budget caps |
 | `brain/state.py` | 58 | `AgentState` TypedDict — 23 fields flowing through pipeline |
-| `brain/graph.py` | 134 | LangGraph wiring, `run_task()`, stage tracking, node timing |
+| `brain/graph.py` | 136 | LangGraph wiring, `run_task()`, stage tracking, node timing |
 | `brain/nodes/classifier.py` | 90 | Fast path (trigger match) → slow path (Claude/Ollama classify) |
 | `brain/nodes/planner.py` | 370 | Task-type prompts, standards/memory/file injection, 7 templates |
 | `brain/nodes/executor.py` | 620 | Code gen + sandbox execution, project commands, auto-install |
 | `brain/nodes/auditor.py` | 290 | Opus adversarial review, env error short-circuit, visual check, JSON parsing |
 | `brain/nodes/deliverer.py` | 360 | Response formatting, memory extraction, temporal mining, debug sidecar |
 | `tools/sandbox.py` | 1240 | Execution sandbox: blocklist, code scanner, Docker, live streaming, server mgmt |
-| `tools/model_router.py` | 160 | Claude/Ollama routing by purpose, complexity, RAM, budget |
+| `tools/model_router.py` | 170 | Claude/Ollama routing by purpose, complexity, RAM, budget |
 | `tools/claude_client.py` | 332 | Anthropic API wrapper: retries, cost tracking, streaming, budget |
-| `tools/file_manager.py` | 154 | Upload handling, metadata extraction, content reading |
+| `tools/file_manager.py` | 153 | Upload handling, metadata extraction, content reading |
 | `tools/deployer.py` | 222 | Static deployment: GitHub Pages, Vercel, Firebase, credential-safe subprocess |
 | `tools/visual_check.py` | 81 | Playwright headless Chromium: page load, console errors, screenshot |
-| `tools/projects.py` | 100 | Project registry loader, trigger matcher |
+| `tools/projects.py` | 99 | Project registry loader, trigger matcher |
 | `storage/db.py` | 396 | SQLite ops: async (bot) + sync (pipeline), 4 tables, WAL mode |
-| `scheduler/cron.py` | 66 | APScheduler with SQLite persistence |
+| `scheduler/cron.py` | 65 | APScheduler with SQLite persistence |
 | `bot/telegram_bot.py` | 63 | Bot factory, command registration |
+| `bot/handlers.py` | 1017 | All Telegram command handlers, auth, message processing, chain, resource management |
 
 ## Pipeline Flow
 
@@ -127,8 +128,8 @@ Dev machine uses `projects.yaml` with different local paths.
 ## Existing .claude/ Config
 
 - `.claude/settings.local.json` — permissions whitelist (python3, git, docker, pip, gh, sqlite3, bash commands)
-- `.claude/worktrees/zen-shaw/` — stale worktree snapshot, can likely be cleaned up
-- No custom commands or skills configured yet
+- `.claude/commands/` — 4 custom commands: audit-node, fix-issue, implement, review-pr
+- Worktree cleaned (Session 0.3)
 
 ## INVARIANTS — DO NOT VIOLATE
 

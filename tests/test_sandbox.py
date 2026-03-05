@@ -1062,3 +1062,138 @@ class TestStdinDevNull:
         finally:
             import shutil
             shutil.rmtree(d, ignore_errors=True)
+
+
+# ── Server management ──────────────────────────────────────────────
+
+
+class TestServerManagement:
+    """Tests for start_server, stop_server, list_servers, _find_free_port."""
+
+    def test_find_free_port_returns_valid_port(self):
+        """_find_free_port() returns a port within the configured range."""
+        from tools.sandbox import _find_free_port
+        port = _find_free_port()
+        assert config.SERVER_PORT_RANGE_START <= port < config.SERVER_PORT_RANGE_END
+
+    def test_start_server_registers_process(self, tmp_path):
+        """start_server registers the process and returns URL + port."""
+        from tools.sandbox import start_server, _running_servers, stop_server
+        from unittest.mock import patch, MagicMock
+
+        mock_popen = MagicMock()
+        mock_popen.pid = 12345
+        mock_popen.poll.return_value = None  # Still running
+
+        with (
+            patch("tools.sandbox.subprocess.Popen", return_value=mock_popen),
+            patch("tools.sandbox._wait_for_http", return_value=True),
+            patch("tools.sandbox._find_free_port", return_value=8100),
+        ):
+            url, port = start_server(
+                "python3 -m http.server {port}",
+                working_dir=tmp_path,
+                task_id="test-srv-1",
+            )
+
+        assert url == "http://127.0.0.1:8100"
+        assert port == 8100
+        # Clean up
+        stop_server("test-srv-1")
+
+    def test_stop_server_kills_process(self, tmp_path):
+        """stop_server kills the process and removes from registry."""
+        from tools.sandbox import start_server, stop_server, _running_servers
+        from unittest.mock import patch, MagicMock
+
+        mock_popen = MagicMock()
+        mock_popen.pid = 12345
+        mock_popen.poll.return_value = None  # Still running
+
+        with (
+            patch("tools.sandbox.subprocess.Popen", return_value=mock_popen),
+            patch("tools.sandbox._wait_for_http", return_value=True),
+            patch("tools.sandbox._find_free_port", return_value=8101),
+            patch("tools.sandbox.os.killpg") as mock_killpg,
+        ):
+            start_server("python3 -m http.server {port}", tmp_path, "test-srv-2")
+            stopped = stop_server("test-srv-2")
+
+        assert stopped is True
+        mock_killpg.assert_called_once()
+        assert "test-srv-2" not in _running_servers
+
+    def test_stop_server_nonexistent_returns_false(self):
+        """stop_server returns False for unknown task_id."""
+        from tools.sandbox import stop_server
+        assert stop_server("nonexistent-task-999") is False
+
+    def test_server_auto_killed_after_lifetime(self, tmp_path):
+        """Server is auto-killed after SERVER_MAX_LIFETIME."""
+        from tools.sandbox import start_server, _running_servers
+        from unittest.mock import patch, MagicMock
+
+        mock_popen = MagicMock()
+        mock_popen.pid = 12345
+        mock_popen.poll.return_value = None
+
+        with (
+            patch("tools.sandbox.subprocess.Popen", return_value=mock_popen),
+            patch("tools.sandbox._wait_for_http", return_value=True),
+            patch("tools.sandbox._find_free_port", return_value=8102),
+            patch.object(config, "SERVER_MAX_LIFETIME", 1),  # 1 second
+            patch("tools.sandbox.os.killpg"),
+        ):
+            start_server("python3 -m http.server {port}", tmp_path, "test-srv-3")
+            # Wait for auto-kill timer (1s + buffer)
+            import time
+            time.sleep(1.5)
+
+        assert "test-srv-3" not in _running_servers
+
+    def test_list_servers_returns_running(self, tmp_path):
+        """list_servers returns info for running servers."""
+        from tools.sandbox import start_server, list_servers, stop_server
+        from unittest.mock import patch, MagicMock
+
+        mock_popen = MagicMock()
+        mock_popen.pid = 12345
+        mock_popen.poll.return_value = None  # Still running
+
+        with (
+            patch("tools.sandbox.subprocess.Popen", return_value=mock_popen),
+            patch("tools.sandbox._wait_for_http", return_value=True),
+            patch("tools.sandbox._find_free_port", return_value=8103),
+        ):
+            start_server("python3 -m http.server {port}", tmp_path, "test-srv-4")
+
+        servers = list_servers()
+        assert len(servers) >= 1
+        srv = [s for s in servers if s["task_id"] == "test-srv-4"]
+        assert len(srv) == 1
+        assert srv[0]["port"] == 8103
+        assert srv[0]["pid"] == 12345
+        assert srv[0]["uptime"] >= 0
+
+        # Clean up
+        stop_server("test-srv-4")
+
+    def test_start_server_timeout_raises(self, tmp_path):
+        """start_server raises RuntimeError if HTTP doesn't respond."""
+        import pytest
+        from tools.sandbox import start_server
+        from unittest.mock import patch, MagicMock
+
+        mock_popen = MagicMock()
+        mock_popen.pid = 12345
+        mock_popen.poll.return_value = None
+
+        with pytest.raises(RuntimeError, match="did not respond"):
+            with (
+                patch("tools.sandbox.subprocess.Popen", return_value=mock_popen),
+                patch("tools.sandbox._wait_for_http", return_value=False),
+                patch("tools.sandbox._find_free_port", return_value=8104),
+                patch("tools.sandbox.os.killpg"),
+                patch.object(config, "SERVER_START_TIMEOUT", 1),
+            ):
+                start_server("python3 -m http.server {port}", tmp_path, "test-srv-5")

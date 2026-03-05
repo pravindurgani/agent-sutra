@@ -99,5 +99,11 @@ DEPLOY_GITHUB_TOKEN = os.getenv("DEPLOY_GITHUB_TOKEN", "")
 DEPLOY_VERCEL_TOKEN = os.getenv("DEPLOY_VERCEL_TOKEN", "")
 DEPLOY_BASE_URL = os.getenv("DEPLOY_BASE_URL", "")  # e.g., "https://agentsutra-bot.github.io"
 
+# Server management (for local dev server preview)
+SERVER_START_TIMEOUT = int(os.getenv("SERVER_START_TIMEOUT", "30"))
+SERVER_MAX_LIFETIME = int(os.getenv("SERVER_MAX_LIFETIME", "300"))
+SERVER_PORT_RANGE_START = int(os.getenv("SERVER_PORT_RANGE_START", "8100"))
+SERVER_PORT_RANGE_END = int(os.getenv("SERVER_PORT_RANGE_END", "8120"))
+
 # Telegram limits
 TELEGRAM_MAX_MESSAGE_LENGTH = 4096

@@ -48,6 +48,193 @@ def _clear_live_output(task_id: str):
         _live_output.pop(task_id, None)
 
 
+# ── Server registry (thread-safe) ─────────────────────────────────
+_running_servers: dict[str, dict] = {}  # task_id -> {"proc": Popen, "port": int, "started_at": float}
+_server_lock = threading.Lock()
+
+
+def _find_free_port() -> int:
+    """Find a free port in the configured range.
+
+    Returns:
+        An available port number.
+
+    Raises:
+        RuntimeError: If no ports are free in the configured range.
+    """
+    import socket
+    for port in range(config.SERVER_PORT_RANGE_START, config.SERVER_PORT_RANGE_END):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(("127.0.0.1", port))
+                return port
+            except OSError:
+                continue
+    raise RuntimeError(
+        f"No free ports in range {config.SERVER_PORT_RANGE_START}-{config.SERVER_PORT_RANGE_END}"
+    )
+
+
+def start_server(
+    command: str,
+    working_dir: Path,
+    task_id: str,
+    port: int | None = None,
+) -> tuple[str, int]:
+    """Start a server process and wait for it to respond on HTTP.
+
+    Args:
+        command: Shell command to run. Use {port} as placeholder for the port.
+        working_dir: Directory to run the server in.
+        task_id: Task ID for registry tracking.
+        port: Specific port to use, or None to auto-detect.
+
+    Returns:
+        Tuple of (url, port) on success.
+
+    Raises:
+        RuntimeError: If the server doesn't start within SERVER_START_TIMEOUT.
+    """
+    if port is None:
+        port = _find_free_port()
+
+    resolved_cmd = command.replace("{port}", str(port))
+    logger.info("Starting server for task %s on port %d: %s", task_id, port, resolved_cmd)
+
+    proc = subprocess.Popen(
+        resolved_cmd,
+        shell=True,
+        cwd=working_dir,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
+
+    with _server_lock:
+        _running_servers[task_id] = {
+            "proc": proc,
+            "port": port,
+            "started_at": time.time(),
+        }
+
+    # Poll until HTTP responds or timeout
+    if not _wait_for_http(port, config.SERVER_START_TIMEOUT):
+        # Server didn't start — clean up
+        stop_server(task_id)
+        raise RuntimeError(
+            f"Server on port {port} did not respond within {config.SERVER_START_TIMEOUT}s"
+        )
+
+    # Start auto-kill timer
+    timer = threading.Thread(
+        target=_auto_kill_timer,
+        args=(task_id, config.SERVER_MAX_LIFETIME),
+        daemon=True,
+    )
+    timer.start()
+
+    url = f"http://127.0.0.1:{port}"
+    logger.info("Server for task %s running at %s", task_id, url)
+    return url, port
+
+
+def stop_server(task_id: str) -> bool:
+    """Stop a running server by task_id.
+
+    Args:
+        task_id: The task ID whose server should be stopped.
+
+    Returns:
+        True if a server was stopped, False if none found.
+    """
+    import signal
+
+    with _server_lock:
+        entry = _running_servers.pop(task_id, None)
+    if entry is None:
+        return False
+
+    proc = entry["proc"]
+    if proc.poll() is None:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass  # Already dead
+        logger.info("Stopped server for task %s (port %d)", task_id, entry["port"])
+    return True
+
+
+def stop_all_servers() -> int:
+    """Stop all running servers.
+
+    Returns:
+        Number of servers stopped.
+    """
+    with _server_lock:
+        task_ids = list(_running_servers.keys())
+
+    count = 0
+    for tid in task_ids:
+        if stop_server(tid):
+            count += 1
+    return count
+
+
+def list_servers() -> list[dict]:
+    """Return list of running servers with task_id, port, pid, uptime.
+
+    Returns:
+        List of dicts with server info. Only includes servers still running.
+    """
+    now = time.time()
+    result = []
+    with _server_lock:
+        for tid, entry in list(_running_servers.items()):
+            proc = entry["proc"]
+            if proc.poll() is not None:
+                # Process already exited — clean up
+                _running_servers.pop(tid, None)
+                continue
+            result.append({
+                "task_id": tid,
+                "port": entry["port"],
+                "pid": proc.pid,
+                "uptime": int(now - entry["started_at"]),
+            })
+    return result
+
+
+def _wait_for_http(port: int, timeout: int) -> bool:
+    """Poll localhost:{port} until it returns 200 or timeout.
+
+    Args:
+        port: Port to check.
+        timeout: Maximum seconds to wait.
+
+    Returns:
+        True if a 200 response was received, False on timeout.
+    """
+    import urllib.request
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            resp = urllib.request.urlopen(f"http://127.0.0.1:{port}", timeout=2)
+            if resp.status == 200:
+                return True
+        except Exception:
+            pass
+        time.sleep(0.5)
+    return False
+
+
+def _auto_kill_timer(task_id: str, lifetime: int):
+    """Background thread that kills a server after lifetime seconds."""
+    time.sleep(lifetime)
+    stopped = stop_server(task_id)
+    if stopped:
+        logger.info("Auto-killed server for task %s after %ds", task_id, lifetime)
+
+
 # Docker availability cache (lazy-checked, refreshed every 60s)
 _docker_status: dict[str, Any] = {"available": False, "checked_at": 0.0}
 

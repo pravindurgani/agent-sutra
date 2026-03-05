@@ -1,13 +1,13 @@
 # AgentSutra
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-548%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-537%20passed-brightgreen.svg)]()
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Claude API](https://img.shields.io/badge/LLM-Claude%20Sonnet%20%2B%20Opus-blueviolet.svg)]()
 
 **A private, autonomous AI agent for your Mac that actually gets work done.**
 
-A self-hosted Telegram bot that classifies your task, writes code, executes it in a sandbox, audits the output with a *different* AI model, and delivers the result. All on your own hardware. ~9,000 lines of production Python, 548+ tests, 13 commands, 11 registered projects.
+A self-hosted Telegram bot that classifies your task, writes code, executes it in a sandbox, audits the output with a *different* AI model, and delivers the result. All on your own hardware. ~9,000 lines of production Python, 537+ tests, 14 commands, 11 registered projects.
 
 ---
 
@@ -24,7 +24,7 @@ A self-hosted Telegram bot that classifies your task, writes code, executes it i
 
 ## What This Is (and Isn't)
 
-**This is:** A working personal AI agent — cross-model auditing, project orchestration, defense-in-depth security, budget enforcement, scheduled tasks, and 548+ tests. Running real daily workflows since February 2026.
+**This is:** A working personal AI agent — cross-model auditing, project orchestration, defense-in-depth security, budget enforcement, scheduled tasks, static deployment, and 537+ tests. Running real daily workflows since February 2026.
 
 **This isn't:** A framework, a library, or a SaaS product. Built for one user on one machine. Fork it, learn from the patterns, or adapt it.
 
@@ -98,7 +98,11 @@ cp projects.yaml.example projects.yaml
 # Edit projects.yaml with your project paths and commands
 # See AGENTSUTRA.md "Project Registry Guide" for the full walkthrough
 
-# 6. Start the bot
+# 6. (Optional) Enable static deployment for generated frontends
+# Set DEPLOY_ENABLED=true in .env plus provider credentials
+# See .env.example for DEPLOY_REPO, DEPLOY_GITHUB_TOKEN, etc.
+
+# 7. Start the bot
 python3 main.py
 ```
 

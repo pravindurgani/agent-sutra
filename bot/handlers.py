@@ -107,7 +107,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/context - View/clear conversation memory\n"
         "/cancel - Cancel running task\n"
         "/projects - List registered projects\n"
-        "/schedule - Schedule a recurring task"
+        "/schedule - Schedule a recurring task\n"
+        "/deploy <task_id> - Deploy frontend artifacts to live URL"
     )
 
 
@@ -878,6 +879,42 @@ async def cmd_chain(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             f"Chain complete - all {len(steps)} steps passed."
         )
+
+
+@auth_required
+async def cmd_deploy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Deploy artifacts from a completed task: /deploy <task_id>."""
+    args = context.args
+    if not args:
+        await update.message.reply_text("Usage: /deploy <task_id>")
+        return
+
+    task_id_prefix = args[0]
+
+    # Find HTML artifacts matching the task ID prefix
+    html_files = list(config.OUTPUTS_DIR.glob(f"*{task_id_prefix}*.html"))
+    if not html_files:
+        await update.message.reply_text(
+            f"No HTML artifacts found for '{task_id_prefix}'. "
+            "/deploy works with frontend/ui_design outputs."
+        )
+        return
+
+    artifact_dir = html_files[0].parent
+    project_name = task_id_prefix
+
+    try:
+        from tools.deployer import deploy
+        url = deploy(artifact_dir, project_name, "frontend")
+        if url:
+            await update.message.reply_text(f"Deployed: {url}")
+        else:
+            await update.message.reply_text(
+                "Deployment failed. Check DEPLOY_ENABLED and credentials in .env."
+            )
+    except Exception as e:
+        logger.warning("Deploy command failed: %s", e)
+        await update.message.reply_text(f"Deployment error: {str(e)[:200]}")
 
 
 @auth_required

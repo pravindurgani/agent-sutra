@@ -31,6 +31,7 @@ Cross-model adversarial auditing: Sonnet generates, Opus reviews.
 | `tools/model_router.py` | 160 | Claude/Ollama routing by purpose, complexity, RAM, budget |
 | `tools/claude_client.py` | 332 | Anthropic API wrapper: retries, cost tracking, streaming, budget |
 | `tools/file_manager.py` | 154 | Upload handling, metadata extraction, content reading |
+| `tools/deployer.py` | 170 | Static deployment: GitHub Pages, Vercel, credential-safe subprocess |
 | `tools/projects.py` | 100 | Project registry loader, trigger matcher |
 | `storage/db.py` | 369 | SQLite ops: async (bot) + sync (pipeline), 4 tables, WAL mode |
 | `scheduler/cron.py` | 66 | APScheduler with SQLite persistence |
@@ -47,7 +48,7 @@ Cross-model adversarial auditing: Sonnet generates, Opus reviews.
 | Execute (code gen) | Sonnet | No | `_generate_code()` | `code` |
 | Execute (run) | — | — | `run_code()` / `run_shell()` | `execution_result` |
 | Audit | **Opus always** | No | `audit()` | `audit_verdict`, `audit_feedback` |
-| Deliver | Sonnet | No | `deliver()` | `final_response`, `artifacts` |
+| Deliver | Sonnet | No | `deliver()` | `final_response`, `artifacts`, `deploy_url` |
 
 ## Database Schema (SQLite WAL)
 
@@ -58,17 +59,17 @@ Cross-model adversarial auditing: Sonnet generates, Opus reviews.
 | `conversation_history` | Message log per user | user_id, role, content, timestamp |
 | `project_memory` (v8) | Success/failure patterns | project_name, memory_type, content, task_id |
 
-## AgentState TypedDict (21 fields)
+## AgentState TypedDict (22 fields)
 
 `task_id`, `user_id`, `message`, `files`, `task_type`, `project_name`, `project_config`,
 `plan`, `code`, `execution_result`, `audit_verdict`, `audit_feedback`, `retry_count`,
 `stage`, `extracted_params`, `working_dir`, `conversation_context`,
-`auto_installed_packages`, `stage_timings` (v8), `final_response`, `artifacts`
+`auto_installed_packages`, `stage_timings` (v8), `deploy_url` (v8.1), `final_response`, `artifacts`
 
-## Telegram Commands (13)
+## Telegram Commands (14)
 
 `/start`, `/status`, `/history`, `/usage`, `/cost`, `/health`, `/exec`, `/context`,
-`/cancel`, `/projects`, `/schedule`, `/chain` (v8), `/debug` (v8)
+`/cancel`, `/projects`, `/schedule`, `/chain` (v8), `/debug` (v8), `/deploy` (v8.1)
 
 ## Security Layers
 

@@ -1582,6 +1582,24 @@ AgentSutra was independently stress-tested using a 4-category evaluation protoco
 
 ## Changelog
 
+### v8.1.0 — 2026-03-05 — Static Deployment
+
+Adds the ability to deploy generated frontend/ui_design artifacts to a live URL via GitHub Pages or Vercel.
+
+**New features:**
+- `tools/deployer.py`: Static deployment module — GitHub Pages and Vercel support, credential-safe subprocess, graceful degradation
+- `/deploy <task_id>`: Manual deployment command for any task's HTML artifacts
+- Auto-deployment for frontend/ui_design tasks after audit pass (in deliverer)
+- `deploy_url` field in AgentState and debug sidecar
+
+**Config:** `DEPLOY_ENABLED`, `DEPLOY_PROVIDER`, `DEPLOY_REPO`, `DEPLOY_GITHUB_TOKEN`, `DEPLOY_VERCEL_TOKEN`, `DEPLOY_BASE_URL`
+
+**New tests:** 25 tests (17 deployer unit + 8 deployer integration)
+
+**Test suite:** 537 tests (501 passed + 36 skipped Docker)
+
+---
+
 ### v8.0.2 — 2026-03-05 — Audit Fixes & Security Hardening
 
 Fixes all open audit issues from the v8 code review plus 3 security bypasses discovered during Telegram test suite execution.

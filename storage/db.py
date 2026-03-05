@@ -354,8 +354,11 @@ async def prune_old_data(history_days: int = 30, usage_days: int = 90):
         )
 
 
-def cleanup_workspace_files(max_age_days: int = 7):
+def cleanup_workspace_files(max_age_days: int = 7, max_files_per_dir: int = 100):
     """Remove output and upload files older than max_age_days.
+
+    Also enforces a count-based cap: if a directory has more than max_files_per_dir
+    files, the oldest ones beyond the cap are deleted regardless of age.
 
     Synchronous — called from bot startup or scheduled cleanup.
     """
@@ -366,6 +369,8 @@ def cleanup_workspace_files(max_age_days: int = 7):
     for directory in [config.OUTPUTS_DIR, config.UPLOADS_DIR]:
         if not directory.exists():
             continue
+
+        # Age-based cleanup
         for f in directory.iterdir():
             if f.is_file() and f.stat().st_mtime < cutoff:
                 try:
@@ -374,5 +379,18 @@ def cleanup_workspace_files(max_age_days: int = 7):
                 except OSError:
                     pass
 
+        # Count-based cleanup: keep only the newest max_files_per_dir files
+        files = sorted(
+            [f for f in directory.iterdir() if f.is_file()],
+            key=lambda f: f.stat().st_mtime,
+            reverse=True,
+        )
+        for f in files[max_files_per_dir:]:
+            try:
+                f.unlink()
+                removed += 1
+            except OSError:
+                pass
+
     if removed:
-        logger.info("Workspace cleanup: removed %d files older than %d days", removed, max_age_days)
+        logger.info("Workspace cleanup: removed %d files (age > %dd or count > %d)", removed, max_age_days, max_files_per_dir)

@@ -23,6 +23,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger("agentsutra")
 
+# Suppress httpx INFO polling noise (90%+ of log volume from Telegram getUpdates)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
 from storage.db import init_db, recover_stale_tasks, prune_old_data, cleanup_workspace_files  # noqa: E402
 from bot.telegram_bot import create_bot  # noqa: E402
 from scheduler.cron import start_scheduler, stop_scheduler  # noqa: E402

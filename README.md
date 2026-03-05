@@ -1,13 +1,13 @@
 # AgentSutra
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-527%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-548%20passed-brightgreen.svg)]()
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Claude API](https://img.shields.io/badge/LLM-Claude%20Sonnet%20%2B%20Opus-blueviolet.svg)]()
 
 **A private, autonomous AI agent for your Mac that actually gets work done.**
 
-A self-hosted Telegram bot that classifies your task, writes code, executes it in a sandbox, audits the output with a *different* AI model, and delivers the result. All on your own hardware. ~9,000 lines of production Python, 527+ tests, 13 commands, 11 registered projects.
+A self-hosted Telegram bot that classifies your task, writes code, executes it in a sandbox, audits the output with a *different* AI model, and delivers the result. All on your own hardware. ~9,000 lines of production Python, 548+ tests, 13 commands, 11 registered projects.
 
 ---
 
@@ -24,7 +24,7 @@ A self-hosted Telegram bot that classifies your task, writes code, executes it i
 
 ## What This Is (and Isn't)
 
-**This is:** A working personal AI agent — cross-model auditing, project orchestration, defense-in-depth security, budget enforcement, scheduled tasks, and 527+ tests. Running real daily workflows since February 2026.
+**This is:** A working personal AI agent — cross-model auditing, project orchestration, defense-in-depth security, budget enforcement, scheduled tasks, and 548+ tests. Running real daily workflows since February 2026.
 
 **This isn't:** A framework, a library, or a SaaS product. Built for one user on one machine. Fork it, learn from the patterns, or adapt it.
 
@@ -197,7 +197,7 @@ AgentSutra/
 │   └── projects.py          # YAML project registry loader
 ├── storage/db.py            # SQLite with WAL mode
 ├── scheduler/cron.py        # APScheduler with SQLite persistence
-├── tests/                   # 527+ tests across 18 files
+├── tests/                   # 548+ tests across 18 files
 ├── projects.yaml            # Your registered projects
 └── .env.example             # Configuration template
 ```
@@ -347,7 +347,7 @@ Run `source venv/bin/activate && pip install -r requirements.txt`. Requires Pyth
 
 ## Tests
 
-527+ tests across 18 files — unit, integration, handler, adversarial stress, and end-to-end:
+548+ tests across 18 files — unit, integration, handler, adversarial stress, and end-to-end:
 
 ```bash
 python3 -m pytest tests/ -v                                  # All tests

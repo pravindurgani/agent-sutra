@@ -1582,6 +1582,31 @@ AgentSutra was independently stress-tested using a 4-category evaluation protoco
 
 ## Changelog
 
+### v8.0.2 — 2026-03-05 — Audit Fixes & Security Hardening
+
+Fixes all open audit issues from the v8 code review plus 3 security bypasses discovered during Telegram test suite execution.
+
+**Audit issue fixes:**
+- `storage/db.py`: FIFO cap (50 rows per project) on `project_memory` table — prevents unbounded growth (M-1)
+- `brain/nodes/planner.py`: Path traversal validation in `_inject_project_files()` using `.resolve() + startswith()` (M-2)
+- `bot/handlers.py`: Verified all file handles use context managers — no leak found (M-3)
+- `tools/model_router.py`: Ollama uses native `system` parameter instead of prompt concatenation (m-2)
+- `tools/model_router.py`: `max_tokens` passed to Ollama via `options.num_predict` (m-3)
+- `tools/model_router.py`: `MODEL_COSTS` imported from `claude_client` instead of duplicated (m-4)
+
+**Security bypass fixes (from Telegram test suite Tier 3):**
+- `tools/sandbox.py`: Added `_check_shell_safety()` — scans bash script content against Tier 1 blocklist before execution. Fixes bypasses where `cat|bash` and `sudo` inside .sh files were not caught.
+- `brain/nodes/planner.py`: Added `SECURITY RESTRICTIONS` block to planner prompt — instructs LLM to refuse system credential file tasks instead of generating synthetic data.
+- `tools/sandbox.py`: `run_code()` now routes bash content through `_check_shell_safety()` alongside existing Python scanner.
+
+**Operational improvements:**
+- `main.py`: Suppressed httpx INFO polling logs (90%+ of log volume)
+- `storage/db.py`: `cleanup_workspace_files()` now enforces count-based cap (100 files) alongside age-based cleanup
+
+**New tests:** 9 tests (1 FIFO cap, 8 shell content safety)
+
+**Test suite:** 548 tests (512 passed + 36 skipped). 36 skipped require Docker Desktop.
+
 ### v8.0.1 - 2026-02-24 - Adversarial Stress Testing & Security Hardening
 
 Two rounds of adversarial stress testing with 144 new tests. Identified and patched 8 vulnerabilities.

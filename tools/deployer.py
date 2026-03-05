@@ -1,11 +1,12 @@
 """Deployment module for publishing generated artifacts to live URLs.
 
-Supports GitHub Pages and Vercel. Designed to be called by the executor
-after successful frontend/ui_design task execution with audit pass.
-Degrades gracefully — deployment failure never crashes the pipeline.
+Supports GitHub Pages, Vercel, and Firebase Hosting. Designed to be called
+by the executor after successful frontend/ui_design task execution with
+audit pass. Degrades gracefully — deployment failure never crashes the pipeline.
 """
 from __future__ import annotations
 
+import json as _json
 import logging
 import re
 import shutil
@@ -39,7 +40,9 @@ def deploy(output_dir: Path, project_name: str, task_type: str) -> str | None:
     safe_name = _sanitize_name(project_name)
 
     try:
-        if config.DEPLOY_PROVIDER == "vercel":
+        if config.DEPLOY_PROVIDER == "firebase":
+            return _deploy_firebase(output_dir, safe_name)
+        elif config.DEPLOY_PROVIDER == "vercel":
             return _deploy_vercel(output_dir, safe_name)
         else:
             return _deploy_github_pages(output_dir, safe_name)
@@ -143,6 +146,55 @@ def _deploy_vercel(output_dir: Path, project_name: str) -> str:
 
     logger.info("Deployed %s to %s via Vercel", project_name, url)
     return url
+
+
+def _deploy_firebase(output_dir: Path, project_name: str) -> str:
+    """Deploy to Firebase Hosting.
+
+    Creates a firebase.json in the output dir, runs firebase deploy,
+    then cleans up the config file.
+
+    Returns:
+        The live URL on Firebase Hosting.
+    """
+    if not config.DEPLOY_FIREBASE_PROJECT:
+        raise ValueError("DEPLOY_FIREBASE_PROJECT not configured")
+    if not config.DEPLOY_FIREBASE_TOKEN:
+        raise ValueError("DEPLOY_FIREBASE_TOKEN not configured")
+
+    # Create minimal firebase.json
+    firebase_config = {
+        "hosting": {
+            "public": ".",
+            "ignore": ["firebase.json", ".*"],
+            "rewrites": [{"source": "**", "destination": "/index.html"}],
+        }
+    }
+    config_path = output_dir / "firebase.json"
+    config_path.write_text(_json.dumps(firebase_config, indent=2))
+
+    try:
+        result = subprocess.run(
+            [
+                "firebase", "deploy", "--only", "hosting",
+                "--project", config.DEPLOY_FIREBASE_PROJECT,
+                "--token", config.DEPLOY_FIREBASE_TOKEN,
+                "--non-interactive",
+            ],
+            cwd=output_dir,
+            capture_output=True, text=True, timeout=120,
+            env=_safe_env(),
+        )
+
+        if result.returncode != 0:
+            raise RuntimeError(f"Firebase deploy failed: {result.stderr[:200]}")
+
+        url = f"https://{config.DEPLOY_FIREBASE_PROJECT}.web.app/{project_name}"
+        logger.info("Deployed %s to %s via Firebase", project_name, url)
+        return url
+    finally:
+        # Clean up firebase.json regardless of success/failure
+        config_path.unlink(missing_ok=True)
 
 
 def _sanitize_name(name: str) -> str:

@@ -173,6 +173,151 @@ class TestDeployVercel:
                 _deploy_vercel(tmp_path, "test")
 
 
+class TestDeployFirebase:
+    """Firebase Hosting deployment path tests."""
+
+    def test_firebase_success(self, tmp_path):
+        """Mocked Firebase deploy returns correct URL."""
+        from tools.deployer import _deploy_firebase
+
+        (tmp_path / "index.html").write_text("<h1>Hello</h1>")
+        mock_result = MagicMock(returncode=0, stdout="Deploy complete!", stderr="")
+
+        with (
+            patch.object(config, "DEPLOY_FIREBASE_PROJECT", "agentsutra-deploy"),
+            patch.object(config, "DEPLOY_FIREBASE_TOKEN", "ci_token_fake"),
+            patch("tools.deployer.subprocess.run", return_value=mock_result),
+            patch("tools.deployer._safe_env", return_value={}),
+        ):
+            url = _deploy_firebase(tmp_path, "my-project")
+
+        assert url == "https://agentsutra-deploy.web.app/my-project"
+
+    def test_firebase_creates_config(self, tmp_path):
+        """firebase.json is created in the output dir before deploy."""
+        from tools.deployer import _deploy_firebase
+        import json
+
+        (tmp_path / "index.html").write_text("<h1>Hello</h1>")
+
+        created_configs = []
+
+        def capture_run(cmd, **kwargs):
+            # Capture firebase.json content at deploy time
+            config_path = tmp_path / "firebase.json"
+            if config_path.exists():
+                created_configs.append(json.loads(config_path.read_text()))
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with (
+            patch.object(config, "DEPLOY_FIREBASE_PROJECT", "agentsutra-deploy"),
+            patch.object(config, "DEPLOY_FIREBASE_TOKEN", "ci_token_fake"),
+            patch("tools.deployer.subprocess.run", side_effect=capture_run),
+            patch("tools.deployer._safe_env", return_value={}),
+        ):
+            _deploy_firebase(tmp_path, "test")
+
+        assert len(created_configs) == 1
+        assert "hosting" in created_configs[0]
+        assert created_configs[0]["hosting"]["public"] == "."
+
+    def test_firebase_cleans_up_config(self, tmp_path):
+        """firebase.json is removed after deployment."""
+        from tools.deployer import _deploy_firebase
+
+        (tmp_path / "index.html").write_text("<h1>Hello</h1>")
+        mock_result = MagicMock(returncode=0, stdout="", stderr="")
+
+        with (
+            patch.object(config, "DEPLOY_FIREBASE_PROJECT", "agentsutra-deploy"),
+            patch.object(config, "DEPLOY_FIREBASE_TOKEN", "ci_token_fake"),
+            patch("tools.deployer.subprocess.run", return_value=mock_result),
+            patch("tools.deployer._safe_env", return_value={}),
+        ):
+            _deploy_firebase(tmp_path, "test")
+
+        assert not (tmp_path / "firebase.json").exists()
+
+    def test_firebase_cleans_up_config_on_failure(self, tmp_path):
+        """firebase.json is removed even when deployment fails."""
+        from tools.deployer import _deploy_firebase
+
+        (tmp_path / "index.html").write_text("<h1>Hello</h1>")
+        mock_result = MagicMock(returncode=1, stdout="", stderr="Error: auth failed")
+
+        with (
+            patch.object(config, "DEPLOY_FIREBASE_PROJECT", "agentsutra-deploy"),
+            patch.object(config, "DEPLOY_FIREBASE_TOKEN", "ci_token_fake"),
+            patch("tools.deployer.subprocess.run", return_value=mock_result),
+            patch("tools.deployer._safe_env", return_value={}),
+        ):
+            with pytest.raises(RuntimeError, match="Firebase deploy failed"):
+                _deploy_firebase(tmp_path, "test")
+
+        assert not (tmp_path / "firebase.json").exists()
+
+    def test_firebase_no_project_raises(self, tmp_path):
+        """Missing DEPLOY_FIREBASE_PROJECT raises ValueError."""
+        from tools.deployer import _deploy_firebase
+
+        with (
+            patch.object(config, "DEPLOY_FIREBASE_PROJECT", ""),
+            patch.object(config, "DEPLOY_FIREBASE_TOKEN", "tok"),
+        ):
+            with pytest.raises(ValueError, match="DEPLOY_FIREBASE_PROJECT"):
+                _deploy_firebase(tmp_path, "test")
+
+    def test_firebase_no_token_raises(self, tmp_path):
+        """Missing DEPLOY_FIREBASE_TOKEN raises ValueError."""
+        from tools.deployer import _deploy_firebase
+
+        with (
+            patch.object(config, "DEPLOY_FIREBASE_PROJECT", "proj"),
+            patch.object(config, "DEPLOY_FIREBASE_TOKEN", ""),
+        ):
+            with pytest.raises(ValueError, match="DEPLOY_FIREBASE_TOKEN"):
+                _deploy_firebase(tmp_path, "test")
+
+    def test_firebase_token_not_in_logs(self, tmp_path, caplog):
+        """DEPLOY_FIREBASE_TOKEN must not appear in any log output."""
+        from tools.deployer import deploy
+
+        fake_token = "ci_SuperSecretFirebaseToken99"
+        (tmp_path / "index.html").write_text("<h1>Test</h1>")
+
+        with (
+            caplog.at_level(logging.DEBUG),
+            patch.object(config, "DEPLOY_ENABLED", True),
+            patch.object(config, "DEPLOY_PROVIDER", "firebase"),
+            patch.object(config, "DEPLOY_FIREBASE_PROJECT", "agentsutra-deploy"),
+            patch.object(config, "DEPLOY_FIREBASE_TOKEN", fake_token),
+            patch("tools.deployer.subprocess.run", side_effect=RuntimeError("simulated")),
+            patch("tools.deployer._safe_env", return_value={}),
+        ):
+            deploy(tmp_path, "test", "frontend")
+
+        for record in caplog.records:
+            assert fake_token not in record.getMessage(), (
+                f"Firebase token leaked in log: {record.getMessage()}"
+            )
+
+    def test_deploy_routes_to_firebase(self, tmp_path):
+        """deploy() routes to _deploy_firebase when provider is firebase."""
+        from tools.deployer import deploy
+
+        (tmp_path / "index.html").write_text("<h1>Hello</h1>")
+
+        with (
+            patch.object(config, "DEPLOY_ENABLED", True),
+            patch.object(config, "DEPLOY_PROVIDER", "firebase"),
+            patch("tools.deployer._deploy_firebase", return_value="https://proj.web.app/test") as mock_fb,
+        ):
+            url = deploy(tmp_path, "test", "frontend")
+
+        assert url == "https://proj.web.app/test"
+        mock_fb.assert_called_once()
+
+
 class TestSanitizeName:
     """Name sanitization for URL-safe directory names."""
 

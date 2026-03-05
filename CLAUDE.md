@@ -3,7 +3,7 @@
 Single-user, self-hosted AI agent. Telegram-controlled. Mac Mini M2 (16GB).
 Fixed 5-stage LangGraph pipeline: Classify → Plan → Execute → Audit → Deliver.
 Cross-model adversarial auditing: Sonnet generates, Opus reviews.
-~5,000 LOC across 17 source files. ~7,200 LOC tests across 19 files. 553 tests (36 skip for Docker).
+~5,100 LOC across 17 source files. ~7,400 LOC tests across 19 files. 561 tests (36 skip for Docker).
 
 ## Architecture
 
@@ -31,7 +31,7 @@ Cross-model adversarial auditing: Sonnet generates, Opus reviews.
 | `tools/model_router.py` | 160 | Claude/Ollama routing by purpose, complexity, RAM, budget |
 | `tools/claude_client.py` | 332 | Anthropic API wrapper: retries, cost tracking, streaming, budget |
 | `tools/file_manager.py` | 154 | Upload handling, metadata extraction, content reading |
-| `tools/deployer.py` | 170 | Static deployment: GitHub Pages, Vercel, credential-safe subprocess |
+| `tools/deployer.py` | 220 | Static deployment: GitHub Pages, Vercel, Firebase, credential-safe subprocess |
 | `tools/visual_check.py` | 80 | Playwright headless Chromium: page load, console errors, screenshot |
 | `tools/projects.py` | 100 | Project registry loader, trigger matcher |
 | `storage/db.py` | 369 | SQLite ops: async (bot) + sync (pipeline), 4 tables, WAL mode |
@@ -103,6 +103,8 @@ Cross-model adversarial auditing: Sonnet generates, Opus reviews.
 | `SERVER_MAX_LIFETIME` | 300s | Auto-kill servers after this |
 | `SERVER_PORT_RANGE_START` | 8100 | Port range for dev servers |
 | `SERVER_PORT_RANGE_END` | 8120 | Port range upper bound |
+| `DEPLOY_FIREBASE_PROJECT` | (empty) | Firebase project ID for hosting |
+| `DEPLOY_FIREBASE_TOKEN` | (empty) | Firebase CI token (credential-stripped) |
 | `VISUAL_CHECK_ENABLED` | false | Enable Playwright visual verification |
 | `VISUAL_CHECK_TIMEOUT` | 15s | Navigation timeout for visual checks |
 
@@ -110,7 +112,8 @@ Cross-model adversarial auditing: Sonnet generates, Opus reviews.
 
 **Required:** `ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`, `ALLOWED_USER_IDS`
 **Optional:** `DAILY_BUDGET_USD`, `MONTHLY_BUDGET_USD`, `DOCKER_ENABLED`, `DOCKER_NETWORK`,
-`OLLAMA_BASE_URL`, `OLLAMA_DEFAULT_MODEL`, `EXECUTION_TIMEOUT`, `MAX_CONCURRENT_TASKS`
+`OLLAMA_BASE_URL`, `OLLAMA_DEFAULT_MODEL`, `EXECUTION_TIMEOUT`, `MAX_CONCURRENT_TASKS`,
+`DEPLOY_ENABLED`, `DEPLOY_PROVIDER`, `DEPLOY_FIREBASE_PROJECT`, `DEPLOY_FIREBASE_TOKEN`
 
 ## Project Registry (projects_macmini.yaml — 12 registered)
 

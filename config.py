@@ -93,11 +93,13 @@ MONTHLY_BUDGET_USD = float(os.getenv("MONTHLY_BUDGET_USD", "0"))
 
 # Deployment (optional — for publishing generated sites/apps)
 DEPLOY_ENABLED = os.getenv("DEPLOY_ENABLED", "false").lower() == "true"
-DEPLOY_PROVIDER = os.getenv("DEPLOY_PROVIDER", "github_pages")  # "github_pages" or "vercel"
+DEPLOY_PROVIDER = os.getenv("DEPLOY_PROVIDER", "github_pages")  # "github_pages", "vercel", or "firebase"
 DEPLOY_REPO = os.getenv("DEPLOY_REPO", "")  # e.g., "agentsutra-bot/deployed-sites"
 DEPLOY_GITHUB_TOKEN = os.getenv("DEPLOY_GITHUB_TOKEN", "")
 DEPLOY_VERCEL_TOKEN = os.getenv("DEPLOY_VERCEL_TOKEN", "")
 DEPLOY_BASE_URL = os.getenv("DEPLOY_BASE_URL", "")  # e.g., "https://agentsutra-bot.github.io"
+DEPLOY_FIREBASE_PROJECT = os.getenv("DEPLOY_FIREBASE_PROJECT", "")
+DEPLOY_FIREBASE_TOKEN = os.getenv("DEPLOY_FIREBASE_TOKEN", "")
 
 # Server management (for local dev server preview)
 SERVER_START_TIMEOUT = int(os.getenv("SERVER_START_TIMEOUT", "30"))

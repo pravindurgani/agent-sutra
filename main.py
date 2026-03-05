@@ -129,6 +129,10 @@ def main():
 
     async def on_shutdown(app):
         stop_scheduler()
+        from tools.sandbox import stop_all_servers
+        stopped = stop_all_servers()
+        if stopped:
+            logger.info("Stopped %d server(s) on shutdown", stopped)
         logger.info("AgentSutra stopped")
 
     bot.post_init = on_startup

@@ -123,6 +123,7 @@ def run_task(
         "conversation_context": conversation_context,
         "auto_installed_packages": [],
         "stage_timings": [],
+        "server_url": "",
         "deploy_url": "",
     }
 

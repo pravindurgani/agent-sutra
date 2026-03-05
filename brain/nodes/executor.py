@@ -514,12 +514,28 @@ def _execute_html_generation(
     output_path.write_text(code, encoding="utf-8")
     logger.info("%s saved: %s (%d bytes)", log_label, output_path, len(code))
 
-    return {
+    result = {
         "code": code,
         "execution_result": f"Execution: SUCCESS (exit code 0)\nOutput:\n{log_label} generated: {filename} ({len(code):,} chars)\nFiles created: {filename}",
         "artifacts": [str(output_path)],
         "working_dir": str(config.OUTPUTS_DIR),
     }
+
+    # Attempt to start a local preview server for frontend artifacts
+    try:
+        from tools.sandbox import start_server
+        serve_dir = output_path.parent
+        url, port = start_server(
+            f"python3 -m http.server {{port}}",
+            working_dir=serve_dir,
+            task_id=state["task_id"],
+        )
+        logger.info("Started local server at %s for task %s", url, state["task_id"])
+        result["server_url"] = url
+    except Exception as e:
+        logger.warning("Failed to start preview server: %s", e)
+
+    return result
 
 
 def _estimate_timeout(state: AgentState) -> int:

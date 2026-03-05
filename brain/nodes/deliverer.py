@@ -104,7 +104,8 @@ Execution output (stdout):
 {f"Code description: {_describe_code(state.get('code', ''))}" if state.get('code') else ""}
 
 Files generated: {', '.join(Path(f).name for f in artifacts if Path(f).exists()) or 'None'}
-{f"DEPLOYED: The site is live at {deploy_url}" if deploy_url else ""}"""
+{f"DEPLOYED: The site is live at {deploy_url}" if deploy_url else ""}
+{f"LOCAL PREVIEW: Server running at {state.get('server_url', '')} (auto-stops after {config.SERVER_MAX_LIFETIME}s)" if state.get("server_url") else ""}"""
 
     try:
         summary = claude_client.call(
@@ -195,6 +196,7 @@ def _write_debug_sidecar(state: AgentState):
             "verdict": state.get("audit_verdict", ""),
             "retry_count": state.get("retry_count", 0),
             "deploy_url": state.get("deploy_url", ""),
+            "server_url": state.get("server_url", ""),
         }
         path = _cfg.OUTPUTS_DIR / f"{state['task_id']}.debug.json"
         path.write_text(_json.dumps(sidecar, indent=2))

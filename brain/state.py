@@ -47,6 +47,9 @@ class AgentState(TypedDict):
     # Per-node timing for debug sidecar
     stage_timings: list[dict]
 
+    # Server preview
+    server_url: str  # Local server URL if started, empty string otherwise
+
     # Deployment
     deploy_url: str  # Live URL if deployed, empty string otherwise
 

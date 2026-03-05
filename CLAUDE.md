@@ -59,17 +59,18 @@ Cross-model adversarial auditing: Sonnet generates, Opus reviews.
 | `conversation_history` | Message log per user | user_id, role, content, timestamp |
 | `project_memory` (v8) | Success/failure patterns | project_name, memory_type, content, task_id |
 
-## AgentState TypedDict (22 fields)
+## AgentState TypedDict (23 fields)
 
 `task_id`, `user_id`, `message`, `files`, `task_type`, `project_name`, `project_config`,
 `plan`, `code`, `execution_result`, `audit_verdict`, `audit_feedback`, `retry_count`,
 `stage`, `extracted_params`, `working_dir`, `conversation_context`,
-`auto_installed_packages`, `stage_timings` (v8), `deploy_url` (v8.1), `final_response`, `artifacts`
+`auto_installed_packages`, `stage_timings` (v8), `server_url` (v8.2), `deploy_url` (v8.1), `final_response`, `artifacts`
 
-## Telegram Commands (14)
+## Telegram Commands (16)
 
 `/start`, `/status`, `/history`, `/usage`, `/cost`, `/health`, `/exec`, `/context`,
-`/cancel`, `/projects`, `/schedule`, `/chain` (v8), `/debug` (v8), `/deploy` (v8.1)
+`/cancel`, `/projects`, `/schedule`, `/chain` (v8), `/debug` (v8), `/deploy` (v8.1),
+`/servers` (v8.2), `/stopserver` (v8.2)
 
 ## Security Layers
 
@@ -96,6 +97,10 @@ Cross-model adversarial auditing: Sonnet generates, Opus reviews.
 | `RAM_THRESHOLD_PERCENT` | 90 | Reject tasks above this |
 | `MAX_FILE_INJECT_COUNT` | 50 | Max project files for dynamic injection |
 | `OLLAMA_DEFAULT_MODEL` | `llama3.1:8b` | Local model for low-complexity offload |
+| `SERVER_START_TIMEOUT` | 30s | Max wait for server HTTP response |
+| `SERVER_MAX_LIFETIME` | 300s | Auto-kill servers after this |
+| `SERVER_PORT_RANGE_START` | 8100 | Port range for dev servers |
+| `SERVER_PORT_RANGE_END` | 8120 | Port range upper bound |
 
 ## Environment Variables (from .env)
 

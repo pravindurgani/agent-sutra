@@ -918,6 +918,43 @@ async def cmd_deploy(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 @auth_required
+async def cmd_stopserver(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Stop a running local server: /stopserver <task_id> or /stopserver all."""
+    args = context.args
+    if not args:
+        await update.message.reply_text("Usage: /stopserver <task_id> or /stopserver all")
+        return
+
+    from tools.sandbox import stop_server, stop_all_servers
+
+    if args[0] == "all":
+        count = stop_all_servers()
+        await update.message.reply_text(f"Stopped {count} server(s).")
+    else:
+        stopped = stop_server(args[0])
+        msg = "Server stopped." if stopped else "No running server found for that task."
+        await update.message.reply_text(msg)
+
+
+@auth_required
+async def cmd_servers(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """List running local servers: /servers."""
+    from tools.sandbox import list_servers
+
+    servers = list_servers()
+    if not servers:
+        await update.message.reply_text("No servers running.")
+        return
+
+    lines = ["Running servers:"]
+    for s in servers:
+        lines.append(
+            f"• {s['task_id'][:8]} — port {s['port']} (pid {s['pid']}, {s['uptime']}s)"
+        )
+    await update.message.reply_text("\n".join(lines))
+
+
+@auth_required
 async def cmd_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show debug sidecar JSON for a task: /debug <task_id>."""
     args = context.args

@@ -601,6 +601,7 @@ class TestPhase2_DebugSidecarDeepPrivacy:
         allowed_fields = {
             "task_id", "message", "task_type", "project_name",
             "stages", "total_duration_ms", "verdict", "retry_count",
+            "deploy_url",
         }
         actual_fields = set(data.keys())
         extra_fields = actual_fields - allowed_fields

@@ -8,6 +8,7 @@ from pathlib import Path
 from brain.state import AgentState
 from tools import claude_client
 from storage.db import sync_write_project_memory
+import config
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,19 @@ def deliver(state: AgentState) -> dict:
         if code_file and code_file not in artifacts:
             artifacts.append(code_file)
 
+    # Deploy if enabled and audit passed
+    deploy_url = ""
+    if verdict == "pass" and task_type in ("frontend", "ui_design") and artifacts:
+        try:
+            from tools.deployer import deploy
+            artifact_dir = Path(artifacts[0]).parent if artifacts else config.OUTPUTS_DIR
+            deploy_url = deploy(artifact_dir, state.get("project_name") or state["task_id"][:8], task_type) or ""
+            if deploy_url:
+                logger.info("Deployed to: %s", deploy_url)
+        except Exception as e:
+            logger.warning("Deployment failed: %s", e)
+            deploy_url = ""
+
     # Build context for the summary generator
     execution_result = state.get("execution_result", "")
     execution_output = _extract_output(execution_result)
@@ -89,7 +103,8 @@ Execution output (stdout):
 
 {f"Code description: {_describe_code(state.get('code', ''))}" if state.get('code') else ""}
 
-Files generated: {', '.join(Path(f).name for f in artifacts if Path(f).exists()) or 'None'}"""
+Files generated: {', '.join(Path(f).name for f in artifacts if Path(f).exists()) or 'None'}
+{f"DEPLOYED: The site is live at {deploy_url}" if deploy_url else ""}"""
 
     try:
         summary = claude_client.call(
@@ -130,7 +145,7 @@ Files generated: {', '.join(Path(f).name for f in artifacts if Path(f).exists())
 
     _write_debug_sidecar(state)
 
-    return {"final_response": summary, "artifacts": artifacts}
+    return {"final_response": summary, "artifacts": artifacts, "deploy_url": deploy_url}
 
 
 def _extract_and_store_memory(state: AgentState) -> None:
@@ -179,6 +194,7 @@ def _write_debug_sidecar(state: AgentState):
             ),
             "verdict": state.get("audit_verdict", ""),
             "retry_count": state.get("retry_count", 0),
+            "deploy_url": state.get("deploy_url", ""),
         }
         path = _cfg.OUTPUTS_DIR / f"{state['task_id']}.debug.json"
         path.write_text(_json.dumps(sidecar, indent=2))

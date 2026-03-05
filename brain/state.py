@@ -47,6 +47,9 @@ class AgentState(TypedDict):
     # Per-node timing for debug sidecar
     stage_timings: list[dict]
 
+    # Deployment
+    deploy_url: str  # Live URL if deployed, empty string otherwise
+
     # Output
     final_response: str
     artifacts: list[str]  # file paths to send back

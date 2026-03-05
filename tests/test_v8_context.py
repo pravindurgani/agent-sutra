@@ -90,6 +90,34 @@ class TestProjectMemoryDB:
         rows = sync_query_project_memories("proj", limit=5)
         assert len(rows) == 5
 
+    def test_fifo_cap_enforced(self, memory_db):
+        """Writing 55 memories for one project keeps only the newest 50 (M-1)."""
+        from storage.db import sync_write_project_memory
+        import sqlite3 as _sqlite3
+
+        for i in range(55):
+            sync_write_project_memory("proj", "success_pattern", f"entry {i}", f"t{i}")
+            time.sleep(0.005)  # Ensure distinct timestamps
+
+        conn = _sqlite3.connect(str(memory_db))
+        try:
+            total = conn.execute(
+                "SELECT COUNT(*) FROM project_memory WHERE project_name = 'proj'"
+            ).fetchone()[0]
+            assert total == 50, f"Expected 50 rows after FIFO cap, got {total}"
+
+            # Verify the oldest 5 were deleted (entries 0-4)
+            remaining = conn.execute(
+                "SELECT content FROM project_memory WHERE project_name = 'proj' "
+                "ORDER BY created_at ASC"
+            ).fetchall()
+            oldest_content = remaining[0][0]
+            assert oldest_content == "entry 5", (
+                f"Expected oldest surviving entry to be 'entry 5', got '{oldest_content}'"
+            )
+        finally:
+            conn.close()
+
 
 # ── Deliverer memory extraction tests ────────────────────────────────
 
@@ -286,3 +314,29 @@ class TestDynamicFileInjection:
         # The file tree sent to Claude should NOT contain __pycache__
         selector_prompt = mock_call.call_args[0][0]
         assert "__pycache__" not in selector_prompt
+
+    def test_path_traversal_blocked(self, tmp_path):
+        """LLM-suggested paths like ../../.env must not escape project root (M-2)."""
+        (tmp_path / "app.py").write_text("main code")
+        # Create a secret file OUTSIDE the project
+        secret = tmp_path.parent / "secret.env"
+        secret.write_text("API_KEY=leaked")
+
+        state = {
+            "task_type": "project",
+            "project_name": "testproj",
+            "project_config": {"path": str(tmp_path)},
+            "message": "Run app",
+        }
+
+        # LLM returns a traversal path alongside a legitimate one
+        traversal = json.dumps(["app.py", "../secret.env"])
+        with patch("tools.claude_client.call", return_value=traversal):
+            from brain.nodes.planner import _inject_project_files
+            result = _inject_project_files(state, "BASE SYSTEM")
+
+        # Legitimate file should be injected
+        assert "main code" in result
+        # Secret file must NOT be injected
+        assert "API_KEY=leaked" not in result
+        assert "secret.env" not in result

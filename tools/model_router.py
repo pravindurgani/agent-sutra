@@ -20,11 +20,8 @@ from tools import claude_client
 
 logger = logging.getLogger(__name__)
 
-# ── Cost lookup (mirrors claude_client.MODEL_COSTS) ──────────────────
-_MODEL_COSTS = {
-    "claude-sonnet-4-6": {"input": 3.00, "output": 15.00},
-    "claude-opus-4-6": {"input": 15.00, "output": 75.00},
-}
+# ── Cost lookup (imported from claude_client to avoid duplication) ────
+from tools.claude_client import MODEL_COSTS as _MODEL_COSTS
 
 
 def route_and_call(
@@ -156,10 +153,17 @@ def _get_today_spend() -> float:
 
 def _call_ollama(prompt: str, system: str, model: str, max_tokens: int) -> str:
     """Call Ollama's /api/generate endpoint."""
-    full_prompt = f"{system}\n\n{prompt}" if system else prompt
+    payload: dict = {
+        "model": model,
+        "prompt": prompt,
+        "stream": False,
+        "options": {"num_predict": max_tokens or 2048},
+    }
+    if system:
+        payload["system"] = system
     response = requests.post(
         f"{config.OLLAMA_BASE_URL}/api/generate",
-        json={"model": model, "prompt": full_prompt, "stream": False},
+        json=payload,
         timeout=60,
     )
     response.raise_for_status()

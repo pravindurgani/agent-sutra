@@ -338,10 +338,14 @@ def _inject_project_files(state: AgentState, system: str) -> str:
         return system
 
     # Read selected files and append to system prompt
+    resolved_root = project_path.resolve()
     injected_parts: list[str] = []
     for rel_path in selected[:5]:
-        full = project_path / rel_path
+        full = (project_path / rel_path).resolve()
         if not full.is_file():
+            continue
+        if not str(full).startswith(str(resolved_root) + "/"):
+            logger.warning("Path traversal blocked: %s escapes %s", rel_path, resolved_root)
             continue
         try:
             content = full.read_text(encoding="utf-8", errors="replace")[:3000]

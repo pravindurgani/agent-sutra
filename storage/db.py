@@ -256,6 +256,15 @@ def sync_write_project_memory(
                 (project_name, memory_type, content,
                  datetime.now(timezone.utc).isoformat(), task_id),
             )
+            # FIFO cap: keep only the newest 50 rows per project (M-1)
+            conn.execute(
+                "DELETE FROM project_memory "
+                "WHERE project_name = ? AND id NOT IN ("
+                "    SELECT id FROM project_memory "
+                "    WHERE project_name = ? ORDER BY created_at DESC LIMIT 50"
+                ")",
+                (project_name, project_name),
+            )
             conn.commit()
         finally:
             conn.close()

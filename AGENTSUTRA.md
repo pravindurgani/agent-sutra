@@ -1582,6 +1582,57 @@ AgentSutra was independently stress-tested using a 4-category evaluation protoco
 
 ## Changelog
 
+### v8.4.0 — 2026-03-05 — Agent Identity & Firebase Deploy
+
+Adds Firebase Hosting as a deployment provider and dedicated agent Google account support.
+
+**New features:**
+- `tools/deployer.py`: Firebase Hosting deployment — creates firebase.json, deploys via CLI, auto-cleanup
+- Config: `DEPLOY_FIREBASE_PROJECT`, `DEPLOY_FIREBASE_TOKEN` (credential-stripped via TOKEN substring match)
+
+**New tests:** 8 Firebase deployment tests (success, config lifecycle, validation, token safety, routing)
+
+**Test suite:** 561 passed, 25 skipped (Docker)
+
+---
+
+### v8.3.0 — 2026-03-05 — Visual Feedback Loop
+
+Adds Playwright-based visual verification for generated web apps, feeding results into the Opus audit prompt.
+
+**New features:**
+- `tools/visual_check.py`: Headless Chromium checks — page load (200 OK), console error capture, full-page screenshot
+- Auditor includes visual verification context (loads, status, console errors) in the Opus audit prompt for frontend/ui_design tasks
+- Deliverer attaches preview.png screenshot to artifacts when available
+- Config: `VISUAL_CHECK_ENABLED` (default: false), `VISUAL_CHECK_TIMEOUT` (default: 15s)
+- Graceful degradation: skips if Playwright not installed, never crashes pipeline
+
+**New tests:** 5 visual check tests (success, no-playwright, timeout, console errors, auditor integration)
+
+**Test suite:** 553 passed, 36 skipped (Docker)
+
+---
+
+### v8.2.0 — 2026-03-05 — Local Server Management
+
+Adds thread-safe server management to the sandbox for local dev server preview of generated web apps.
+
+**New features:**
+- `tools/sandbox.py`: Server registry with `start_server()`, `stop_server()`, `stop_all_servers()`, `list_servers()`
+- Port allocation from configurable range (8100-8120), HTTP polling for readiness, auto-kill timer
+- `/servers`: List running local servers (port, PID, uptime)
+- `/stopserver <task_id|all>`: Stop servers by task ID or all at once
+- Executor auto-starts `python3 -m http.server` for frontend/ui_design tasks after HTML generation
+- `server_url` field in AgentState and debug sidecar
+- Graceful shutdown: `stop_all_servers()` called in bot `on_shutdown` callback
+- Config: `SERVER_START_TIMEOUT`, `SERVER_MAX_LIFETIME`, `SERVER_PORT_RANGE_START`, `SERVER_PORT_RANGE_END`
+
+**New tests:** 11 tests (7 server management unit + 4 server integration)
+
+**Test suite:** 548 passed, 36 skipped (Docker)
+
+---
+
 ### v8.1.0 — 2026-03-05 — Static Deployment
 
 Adds the ability to deploy generated frontend/ui_design artifacts to a live URL via GitHub Pages or Vercel.

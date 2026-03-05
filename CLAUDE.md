@@ -1,9 +1,9 @@
-# AgentSutra v8.0.0 — Project Context for Claude Code
+# AgentSutra v8.4.0 — Project Context for Claude Code
 
 Single-user, self-hosted AI agent. Telegram-controlled. Mac Mini M2 (16GB).
 Fixed 5-stage LangGraph pipeline: Classify → Plan → Execute → Audit → Deliver.
 Cross-model adversarial auditing: Sonnet generates, Opus reviews.
-~5,100 LOC across 17 source files. ~7,400 LOC tests across 19 files. 561 tests (36 skip for Docker).
+~5,500 LOC across 18 source files. ~8,000 LOC tests across 22 files. 586 test functions (561 passing, 25 skipped/Docker).
 
 ## Architecture
 
@@ -18,25 +18,25 @@ Cross-model adversarial auditing: Sonnet generates, Opus reviews.
 ### File Map
 | File | Lines | Purpose |
 |------|------:|---------|
-| `main.py` | 142 | Entry point: env validation, DB init, crash recovery, bot start |
-| `config.py` | 95 | All constants, paths, model names, timeouts, budget caps |
-| `brain/state.py` | 52 | `AgentState` TypedDict — 21 fields flowing through pipeline |
+| `main.py` | 149 | Entry point: env validation, DB init, crash recovery, bot start |
+| `config.py` | 115 | All constants, paths, model names, timeouts, budget caps |
+| `brain/state.py` | 58 | `AgentState` TypedDict — 23 fields flowing through pipeline |
 | `brain/graph.py` | 134 | LangGraph wiring, `run_task()`, stage tracking, node timing |
 | `brain/nodes/classifier.py` | 90 | Fast path (trigger match) → slow path (Claude/Ollama classify) |
-| `brain/nodes/planner.py` | 359 | Task-type prompts, standards/memory/file injection, 7 templates |
-| `brain/nodes/executor.py` | 604 | Code gen + sandbox execution, project commands, auto-install |
-| `brain/nodes/auditor.py` | 274 | Opus adversarial review, env error short-circuit, JSON parsing |
-| `brain/nodes/deliverer.py` | 327 | Response formatting, memory extraction, temporal mining, debug sidecar |
-| `tools/sandbox.py` | 1034 | Execution sandbox: blocklist, code scanner, Docker, live streaming |
+| `brain/nodes/planner.py` | 370 | Task-type prompts, standards/memory/file injection, 7 templates |
+| `brain/nodes/executor.py` | 620 | Code gen + sandbox execution, project commands, auto-install |
+| `brain/nodes/auditor.py` | 290 | Opus adversarial review, env error short-circuit, visual check, JSON parsing |
+| `brain/nodes/deliverer.py` | 360 | Response formatting, memory extraction, temporal mining, debug sidecar |
+| `tools/sandbox.py` | 1240 | Execution sandbox: blocklist, code scanner, Docker, live streaming, server mgmt |
 | `tools/model_router.py` | 160 | Claude/Ollama routing by purpose, complexity, RAM, budget |
 | `tools/claude_client.py` | 332 | Anthropic API wrapper: retries, cost tracking, streaming, budget |
 | `tools/file_manager.py` | 154 | Upload handling, metadata extraction, content reading |
-| `tools/deployer.py` | 220 | Static deployment: GitHub Pages, Vercel, Firebase, credential-safe subprocess |
-| `tools/visual_check.py` | 80 | Playwright headless Chromium: page load, console errors, screenshot |
+| `tools/deployer.py` | 222 | Static deployment: GitHub Pages, Vercel, Firebase, credential-safe subprocess |
+| `tools/visual_check.py` | 81 | Playwright headless Chromium: page load, console errors, screenshot |
 | `tools/projects.py` | 100 | Project registry loader, trigger matcher |
-| `storage/db.py` | 369 | SQLite ops: async (bot) + sync (pipeline), 4 tables, WAL mode |
+| `storage/db.py` | 396 | SQLite ops: async (bot) + sync (pipeline), 4 tables, WAL mode |
 | `scheduler/cron.py` | 66 | APScheduler with SQLite persistence |
-| `bot/telegram_bot.py` | 57 | Bot factory, command registration |
+| `bot/telegram_bot.py` | 63 | Bot factory, command registration |
 
 ## Pipeline Flow
 
@@ -144,8 +144,8 @@ Dev machine uses `projects.yaml` with different local paths.
 ## Build & Test
 
 ```bash
-pytest tests/ -v                          # all 548 tests
-pytest tests/ -v -k "not docker"          # skip Docker-required tests
+pytest tests/ -v                          # all 586 tests
+pytest tests/ -v -k "not docker"          # skip Docker-required tests (561 pass)
 pytest tests/test_sandbox.py -v           # specific module
 pytest tests/test_v8_foundation.py -v     # v8 features only
 pytest tests/test_stress_v8.py -v         # adversarial stress tests (64 tests)
@@ -184,17 +184,15 @@ pytest tests/test_stress_v8_audit2.py -v  # stress round 2 (80 tests)
 ## Current Priorities / Roadmap
 
 1. ~~**Fix open audit issues**~~ — All fixed in v8.0.2 (M-1, M-2, M-3 verified, m-2, m-3, m-4, 3 security bypasses)
-2. **Deployment capability** — Start/stop local servers, deploy to Firebase/Vercel/Fly.io. Requires dedicated Google account.
+2. ~~**Deployment capability**~~ — GitHub Pages, Vercel, Firebase deploy. Local server management. `/deploy`, `/servers`, `/stopserver`. (v8.1.0–v8.4.0)
 3. **RAG context layer** — LanceDB + nomic-embed-text via Ollama. Replace 50-file-cap injection. Trigger: >100 files OR >8000 tokens.
-4. **Visual feedback loop** — Headless Playwright checks for generated web apps (server starts? 200 OK? console errors?).
+4. ~~**Visual feedback loop**~~ — Playwright headless Chromium checks: page load, console errors, screenshot. Feeds into audit prompt. (v8.3.0)
 5. **Guided onboarding** — `/setup` command for new users (project registration, Ollama, budget, smoke test).
-6. **Dedicated agent identity** — Separate Google account (Drive, Firebase, Gmail), Proton email, optional phone number.
+6. ~~**Dedicated agent identity**~~ — Firebase Hosting with dedicated deploy account. (v8.4.0)
 
 ## Known Limitations
 
 - No codebase understanding — samples 3-5 files, no architectural model. RAG will help but not fully solve.
-- No deployment — builds frontends/backends but can't host, serve, or deploy them.
-- No visual evaluation — quality gate is "code ran without errors" only.
 - Context evaporates between sessions — shallow conversation history and project memory.
 - 30-min temporal window — misses longer natural gaps. 2-hour window captures ~40% more patterns.
 - Memory cap — `project_memory` capped at 50 rows per project via FIFO (M-1 fixed).

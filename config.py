@@ -91,5 +91,13 @@ DOCKER_PIP_CACHE = WORKSPACE_DIR / ".pip-cache"
 DAILY_BUDGET_USD = float(os.getenv("DAILY_BUDGET_USD", "0"))
 MONTHLY_BUDGET_USD = float(os.getenv("MONTHLY_BUDGET_USD", "0"))
 
+# Deployment (optional — for publishing generated sites/apps)
+DEPLOY_ENABLED = os.getenv("DEPLOY_ENABLED", "false").lower() == "true"
+DEPLOY_PROVIDER = os.getenv("DEPLOY_PROVIDER", "github_pages")  # "github_pages" or "vercel"
+DEPLOY_REPO = os.getenv("DEPLOY_REPO", "")  # e.g., "agentsutra-bot/deployed-sites"
+DEPLOY_GITHUB_TOKEN = os.getenv("DEPLOY_GITHUB_TOKEN", "")
+DEPLOY_VERCEL_TOKEN = os.getenv("DEPLOY_VERCEL_TOKEN", "")
+DEPLOY_BASE_URL = os.getenv("DEPLOY_BASE_URL", "")  # e.g., "https://agentsutra-bot.github.io"
+
 # Telegram limits
 TELEGRAM_MAX_MESSAGE_LENGTH = 4096

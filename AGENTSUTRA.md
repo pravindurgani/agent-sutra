@@ -1,8 +1,8 @@
-# AgentSutra v8.4.0 - Complete Project Documentation
+# AgentSutra v8.4.1 - Complete Project Documentation
 
-A Telegram-driven AI agent server running on Mac Mini M2 (16GB). Receives tasks via Telegram, processes them through a LangGraph Plan-Execute-Audit pipeline powered by Claude API, and delivers results back. Features: project registry with shared auto-managed venv, cross-model adversarial auditing (Sonnet+Opus), full internet access, local AI orchestration (Ollama), big data processing, production frontend generation, Docker container isolation for code execution, static deployment (GitHub Pages, Vercel, Firebase Hosting), local server preview with auto-kill, Playwright visual verification, 7 task types, 16 commands, budget enforcement, RAM guards, code content scanner, 39-pattern command blocklist, environment error detection, project dependency bootstrapping, streaming for extended thinking, honest failure delivery, cross-task memory, model routing, task chaining, and 561+ automated tests.
+A Telegram-driven AI agent server running on Mac Mini M2 (16GB). Receives tasks via Telegram, processes them through a LangGraph Plan-Execute-Audit pipeline powered by Claude API, and delivers results back. Features: project registry with shared auto-managed venv, cross-model adversarial auditing (Sonnet+Opus), full internet access, local AI orchestration (Ollama), big data processing, production frontend generation, Docker container isolation for code execution, static deployment (GitHub Pages, Vercel, Firebase Hosting), local server preview with auto-kill, Playwright visual verification, 7 task types, 16 commands, budget enforcement, RAM guards, code content scanner, 39-pattern command blocklist, fabrication detection, truncation recovery, environment error detection, project dependency bootstrapping, streaming for extended thinking, honest failure delivery, cross-task memory, model routing, task chaining, and 602+ automated tests.
 
-**Last updated:** 2026-03-05
+**Last updated:** 2026-03-07
 
 ---
 
@@ -1656,6 +1656,31 @@ AgentSutra was independently stress-tested using a 4-category evaluation protoco
 ---
 
 ## Changelog
+
+### v8.4.1 — 2026-03-07 — Test Suite Hardening
+
+Remediates 5 production failures found during the 4-hour, 42-test Telegram test suite on v8.4.0.
+
+**Security fixes:**
+- Python-embedded shell script content now scanned for Tier 1 patterns (setup.sh bypass)
+- `run_shell()` scans script file content when executing `bash`/`sh` on a file
+- Deliverer short-circuits to minimal response when code scanner blocks execution
+
+**Pipeline fixes:**
+- Chain steps execute literally — no graceful rewriting of failing assertions (exit-code-based strict-AND gate)
+- Code truncation detection with automatic shorter-version retry (unclosed parens/brackets/strings)
+- Auditor catches library substitution and fake data generation (fabrication detection)
+- Stricter honest-failure enforcement in auditor and deliverer prompts
+
+**Infrastructure fixes:**
+- Ollama migrated from `/api/generate` to `/api/chat` endpoint (v0.5+), with 404 fallback to legacy
+- Startup Ollama model validation with tag mismatch detection
+
+**New tests:** 28 remediation tests (`test_v8_remediation.py`), 13 Tier 1+ scanning tests (`test_sandbox.py`)
+
+**Test suite:** 602 passed, 36 skipped (Docker)
+
+---
 
 ### v8.4.0 — 2026-03-05 — Agent Identity & Firebase Deploy
 

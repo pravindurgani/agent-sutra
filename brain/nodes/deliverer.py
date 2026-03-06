@@ -34,7 +34,8 @@ Formatting rules:
 - Keep response under 1800 characters (Telegram limit)
 - Be informative, concise, and professional
 - Use plain text only (no markdown links, no HTML tags)
-- Do NOT include raw tracebacks, stderr, or full code listings"""
+- Do NOT include raw tracebacks, stderr, or full code listings
+- If the code used a DIFFERENT library than requested, or connected to a DIFFERENT data source than specified, or generated synthetic/sample data instead of real data — this is a FAILURE even if the code ran without errors. Report it as FAILED."""
 
 
 def deliver(state: AgentState) -> dict:
@@ -73,8 +74,19 @@ def deliver(state: AgentState) -> dict:
             logger.warning("Deployment failed: %s", e)
             deploy_url = ""
 
-    # Build context for the summary generator
+    # Security-blocked short-circuit: if the code scanner blocked execution,
+    # do NOT describe the tool's intended functionality. Return a minimal response.
     execution_result = state.get("execution_result", "")
+    if "BLOCKED:" in execution_result:
+        logger.info("Task %s blocked by security policy — delivering minimal response", state["task_id"])
+        _write_debug_sidecar(state)
+        return {
+            "final_response": "This task was blocked by security policy. No code was executed.",
+            "artifacts": [],
+            "deploy_url": "",
+        }
+
+    # Build context for the summary generator
     execution_output = _extract_output(execution_result)
 
     # For project tasks, include parameter info

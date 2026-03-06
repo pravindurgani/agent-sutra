@@ -152,7 +152,39 @@ def _get_today_spend() -> float:
 
 
 def _call_ollama(prompt: str, system: str, model: str, max_tokens: int) -> str:
-    """Call Ollama's /api/generate endpoint."""
+    """Call Ollama's /api/chat endpoint (Ollama v0.5+).
+
+    Uses the chat completions API which is the stable endpoint for Ollama v0.5+.
+    Falls back to /api/generate if /api/chat returns 404 (older Ollama versions).
+    """
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
+
+    payload: dict = {
+        "model": model,
+        "messages": messages,
+        "stream": False,
+        "options": {"num_predict": max_tokens or 2048},
+    }
+    try:
+        response = requests.post(
+            f"{config.OLLAMA_BASE_URL}/api/chat",
+            json=payload,
+            timeout=120,
+        )
+        response.raise_for_status()
+        return response.json().get("message", {}).get("content", "")
+    except requests.HTTPError as e:
+        if e.response is not None and e.response.status_code == 404:
+            logger.warning("Ollama /api/chat returned 404, falling back to /api/generate")
+            return _call_ollama_generate(prompt, system, model, max_tokens)
+        raise
+
+
+def _call_ollama_generate(prompt: str, system: str, model: str, max_tokens: int) -> str:
+    """Legacy fallback: call Ollama's /api/generate endpoint (pre-v0.5)."""
     payload: dict = {
         "model": model,
         "prompt": prompt,
@@ -164,7 +196,7 @@ def _call_ollama(prompt: str, system: str, model: str, max_tokens: int) -> str:
     response = requests.post(
         f"{config.OLLAMA_BASE_URL}/api/generate",
         json=payload,
-        timeout=60,
+        timeout=120,
     )
     response.raise_for_status()
     return response.json().get("response", "")

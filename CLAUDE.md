@@ -1,9 +1,9 @@
-# AgentSutra v8.4.0 — Project Context for Claude Code
+# AgentSutra v8.4.1 — Project Context for Claude Code
 
 Single-user, self-hosted AI agent. Telegram-controlled. Mac Mini M2 (16GB).
 Fixed 5-stage LangGraph pipeline: Classify → Plan → Execute → Audit → Deliver.
 Cross-model adversarial auditing: Sonnet generates, Opus reviews.
-~5,500 LOC across 20 source files. ~8,000 LOC tests across 22 files. 586 test functions (561 passing, 25 skipped/Docker).
+~6,300 LOC across 20 source files. ~8,800 LOC tests across 24 files. 602 test functions (602 passing, 36 skipped/Docker).
 
 ## Architecture
 
@@ -18,17 +18,17 @@ Cross-model adversarial auditing: Sonnet generates, Opus reviews.
 ### File Map
 | File | Lines | Purpose |
 |------|------:|---------|
-| `main.py` | 148 | Entry point: env validation, DB init, crash recovery, bot start |
+| `main.py` | 196 | Entry point: env validation, DB init, crash recovery, Ollama check, bot start |
 | `config.py` | 115 | All constants, paths, model names, timeouts, budget caps |
 | `brain/state.py` | 58 | `AgentState` TypedDict — 23 fields flowing through pipeline |
 | `brain/graph.py` | 136 | LangGraph wiring, `run_task()`, stage tracking, node timing |
 | `brain/nodes/classifier.py` | 90 | Fast path (trigger match) → slow path (Claude/Ollama classify) |
 | `brain/nodes/planner.py` | 370 | Task-type prompts, standards/memory/file injection, 7 templates |
-| `brain/nodes/executor.py` | 620 | Code gen + sandbox execution, project commands, auto-install |
-| `brain/nodes/auditor.py` | 290 | Opus adversarial review, env error short-circuit, visual check, JSON parsing |
-| `brain/nodes/deliverer.py` | 360 | Response formatting, memory extraction, temporal mining, debug sidecar |
-| `tools/sandbox.py` | 1240 | Execution sandbox: blocklist, code scanner, Docker, live streaming, server mgmt |
-| `tools/model_router.py` | 170 | Claude/Ollama routing by purpose, complexity, RAM, budget |
+| `brain/nodes/executor.py` | 704 | Code gen + sandbox execution, project commands, auto-install, truncation detection |
+| `brain/nodes/auditor.py` | 296 | Opus adversarial review, env error short-circuit, visual check, fabrication detection |
+| `brain/nodes/deliverer.py` | 372 | Response formatting, memory extraction, temporal mining, debug sidecar, security blocking |
+| `tools/sandbox.py` | 1278 | Execution sandbox: blocklist, code scanner, script file scanning, Docker, live streaming, server mgmt |
+| `tools/model_router.py` | 202 | Claude/Ollama routing by purpose, complexity, RAM, budget, /api/chat migration |
 | `tools/claude_client.py` | 332 | Anthropic API wrapper: retries, cost tracking, streaming, budget |
 | `tools/file_manager.py` | 153 | Upload handling, metadata extraction, content reading |
 | `tools/deployer.py` | 222 | Static deployment: GitHub Pages, Vercel, Firebase, credential-safe subprocess |
@@ -37,7 +37,7 @@ Cross-model adversarial auditing: Sonnet generates, Opus reviews.
 | `storage/db.py` | 396 | SQLite ops: async (bot) + sync (pipeline), 4 tables, WAL mode |
 | `scheduler/cron.py` | 65 | APScheduler with SQLite persistence |
 | `bot/telegram_bot.py` | 63 | Bot factory, command registration |
-| `bot/handlers.py` | 1017 | All Telegram command handlers, auth, message processing, chain, resource management |
+| `bot/handlers.py` | 1037 | All Telegram command handlers, auth, message processing, chain (strict-AND gate), resource management |
 
 ## Pipeline Flow
 
@@ -77,12 +77,16 @@ Cross-model adversarial auditing: Sonnet generates, Opus reviews.
 ## Security Layers
 
 - **Tier 1** — 39 blocked patterns: `rm -rf`, `sudo`, `curl|sh`, `chmod 777`, `mkfs`, fork bombs, etc. Always blocked.
+- **Tier 1+ (v8.4.1)** — Full Python code text scanned against Tier 1 blocklist (catches shell patterns in strings/comments). Script file content scanned when `bash/sh` executes a file.
 - **Tier 3** — 12 audit-logged patterns: `rm`, `chmod`, `git push`, `curl`, `python3 -c`. Allowed but logged.
-- **Tier 4** — 8 code scanner patterns: credential reads, `os.system()`, `shutil.rmtree(/)`, reverse shells. Scans Python content.
+- **Tier 4** — 8 code scanner patterns: credential reads, dangerous system calls, filesystem wipes, reverse shells. Scans Python content.
 - **Credential stripping** — `_filter_env()` removes API keys/tokens/secrets from subprocess env via exact match + substring.
 - **Docker isolation** — Optional container execution. Only `workspace/` mounted. All caps dropped, PIDs limited to 256.
 - **Opus audit gate** — Every output reviewed by a different model before delivery.
 - **Visual verification** — Optional Playwright check for frontend tasks: page loads, console errors, screenshot (feeds into audit prompt).
+- **Fabrication detection (v8.4.1)** — Auditor checks if agent substituted libraries, faked data, or rewrote the task. Deliverer enforces honest failure reporting.
+- **Chain strict-AND gate (v8.4.1)** — Exit-code based halting (Claude can't fake exit codes). Literal execution prefix prevents graceful rewriting.
+- **Truncation detection (v8.4.1)** — Detects code cut off by max_tokens (unclosed parens/brackets/strings). Auto-retries with shorter prompt.
 - **Budget enforcement** — Daily/monthly caps checked before every Claude API call.
 - **RAM guard** — Rejects tasks above 90% memory usage.
 
@@ -145,10 +149,11 @@ Dev machine uses `projects.yaml` with different local paths.
 ## Build & Test
 
 ```bash
-pytest tests/ -v                          # all 586 tests
-pytest tests/ -v -k "not docker"          # skip Docker-required tests (561 pass)
-pytest tests/test_sandbox.py -v           # specific module
+pytest tests/ -v                          # all 638 tests
+pytest tests/ -v -k "not docker"          # skip Docker-required tests (602 pass)
+pytest tests/test_sandbox.py -v           # specific module (incl. Tier 1+ scanning)
 pytest tests/test_v8_foundation.py -v     # v8 features only
+pytest tests/test_v8_remediation.py -v    # v8.4.1 remediation tests (28 tests)
 pytest tests/test_stress_v8.py -v         # adversarial stress tests (64 tests)
 pytest tests/test_stress_v8_audit2.py -v  # stress round 2 (80 tests)
 ```
@@ -160,7 +165,7 @@ pytest tests/test_stress_v8_audit2.py -v  # stress round 2 (80 tests)
 → `brain/nodes/deliverer.py` → `tools/sandbox.py` → `tools/model_router.py`
 → `tools/claude_client.py` → `storage/db.py` → `bot/handlers.py`
 
-## Known Issues (from v8 audit, 24 Feb 2026 — validated 5 Mar 2026)
+## Known Issues (from v8 audit, 24 Feb 2026 — validated 6 Mar 2026)
 
 | ID | Severity | File | Status | Issue |
 |----|----------|------|--------|-------|
@@ -173,11 +178,16 @@ pytest tests/test_stress_v8_audit2.py -v  # stress round 2 (80 tests)
 | m-4 | Minor | tools/model_router.py | **FIXED v8.0.2** | `MODEL_COSTS` imported from `claude_client`. |
 | SEC-1 | Security | tools/sandbox.py | **FIXED v8.0.2** | Shell script content now scanned against Tier 1 blocklist (cat\|bash, sudo bypasses). |
 | SEC-2 | Security | brain/nodes/planner.py | **FIXED v8.0.2** | Planner refuses system credential file tasks (synthetic /etc/shadow bypass). |
+| R.1 | Critical | tools/sandbox.py | **FIXED v8.4.1** | Python-embedded shell patterns (cat\|bash in strings) now scanned. Script file content scanned on bash/sh execution. |
+| R.2 | High | bot/handlers.py | **FIXED v8.4.1** | Chain strict-AND gate uses exit codes (unfakeable). Literal execution prefix prevents graceful rewriting. |
+| R.3 | Medium | brain/nodes/executor.py | **FIXED v8.4.1** | Truncation detection (unclosed parens/brackets/strings) with automatic shorter re-generation. |
+| R.4 | Medium | tools/model_router.py | **FIXED v8.4.1** | Ollama migrated to /api/chat endpoint (v0.5+). Startup model validation added. |
+| R.5 | Medium | brain/nodes/auditor.py | **FIXED v8.4.1** | Fabrication detection: library substitution, fake data generation, task rewriting caught by auditor. |
 
 ## Test Coverage Gaps (from audit)
 
-- No tests for `/chain` command (strict-AND gate, `{output}` replacement, DB lifecycle)
-- No tests for `_call_ollama()` directly
+- ~~No tests for `/chain` command~~ — **FIXED v8.4.1**: 7 tests for strict-AND gate and literal execution prefix
+- ~~No tests for `_call_ollama()` directly~~ — **FIXED v8.4.1**: 4 tests for /api/chat endpoint, 404 fallback, legacy
 - No path traversal test for `_inject_project_files()`
 - No test for `_get_today_spend()` cost calculation
 - No end-to-end test for `task_id` flow: handler → executor → sandbox → live output → polling

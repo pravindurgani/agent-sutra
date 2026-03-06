@@ -75,6 +75,51 @@ def _ensure_shared_project_venv():
         logger.error("Failed to bootstrap shared project venv: %s", e)
 
 
+def _check_ollama_model():
+    """Validate that the configured Ollama model is available at startup.
+
+    Non-blocking: logs a warning if Ollama is unreachable or the model is missing.
+    The pipeline will still fall back to Claude at runtime.
+    """
+    try:
+        import requests
+    except ImportError:
+        logger.info("requests not available — skipping Ollama check")
+        return
+    try:
+        r = requests.get(f"{config.OLLAMA_BASE_URL}/api/tags", timeout=3)
+        if r.status_code != 200:
+            logger.warning("Ollama API returned %d — local model offloading disabled", r.status_code)
+            return
+
+        models = [m.get("name", "") for m in r.json().get("models", [])]
+        expected = config.OLLAMA_DEFAULT_MODEL
+
+        if expected in models:
+            logger.info("Ollama model '%s' available (%d models total)", expected, len(models))
+        else:
+            # Check if base name matches (e.g. "llama3.1:8b" vs "llama3.1:latest")
+            base = expected.split(":")[0]
+            available_bases = [m.split(":")[0] for m in models]
+            if base in available_bases:
+                matching = [m for m in models if m.startswith(base)]
+                logger.warning(
+                    "Ollama model '%s' not found, but '%s' is available. "
+                    "Update OLLAMA_DEFAULT_MODEL in .env to match.",
+                    expected, matching[0],
+                )
+            else:
+                logger.warning(
+                    "Ollama model '%s' not found. Available: %s. "
+                    "Ollama calls will fall back to Claude.",
+                    expected, ", ".join(models[:5]) or "(none)",
+                )
+    except requests.ConnectionError:
+        logger.info("Ollama not running at %s — local model offloading disabled", config.OLLAMA_BASE_URL)
+    except Exception as e:
+        logger.warning("Ollama startup check failed: %s", e)
+
+
 def main():
     """Main entry point."""
     # Validate config
@@ -114,6 +159,9 @@ def main():
     # Ensure one exists before building the bot.
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
+
+    # Validate Ollama model availability (non-blocking — just logs a warning)
+    _check_ollama_model()
 
     # Load project registry
     projects = load_projects()

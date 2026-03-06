@@ -4,7 +4,7 @@ Every folder, file, and configuration in the AgentSutra project — what it is, 
 
 **Generated:** 2026-02-24 (v8.0.0 baseline)
 
-> **Note:** This reference was written at v8.0.0. Versions 8.1.0–8.4.0 added: `tools/deployer.py` (static deployment), `tools/visual_check.py` (Playwright verification), server management in `tools/sandbox.py`, `/deploy`, `/servers`, `/stopserver` commands, `server_url` and `deploy_url` in AgentState, Firebase Hosting support, and visual check context in the auditor. See [AGENTSUTRA.md changelog](AGENTSUTRA.md#changelog) for full details.
+> **Note:** This reference was written at v8.0.0. Versions 8.1.0–8.4.1 added: `tools/deployer.py` (static deployment), `tools/visual_check.py` (Playwright verification), server management in `tools/sandbox.py`, `/deploy`, `/servers`, `/stopserver` commands, `server_url` and `deploy_url` in AgentState, Firebase Hosting support, visual check context in the auditor, Tier 1+ code/script scanning, truncation detection, fabrication detection, and chain strict-AND gate. See [AGENTSUTRA.md changelog](AGENTSUTRA.md#changelog) for full details.
 
 ---
 
@@ -34,13 +34,13 @@ Every folder, file, and configuration in the AgentSutra project — what it is, 
 
 AgentSutra is a self-hosted Telegram bot that receives natural language tasks, processes them through a 5-stage LangGraph pipeline (Classify → Plan → Execute → Audit → Deliver), and returns results. It runs on a Mac Mini M2 (16GB) for a single authenticated user.
 
-**Key numbers (v8.4.0):**
-- ~5,500 lines of application code across 18 source files
-- ~8,000 lines of test code across 22 test files
-- 561 automated tests passing (25 skipped — Docker required)
+**Key numbers (v8.4.1):**
+- ~6,300 lines of application code across 20 source files
+- ~8,800 lines of test code across 24 test files
+- 602 automated tests passing (36 skipped — Docker required)
 - 16 Telegram commands
 - 7 task types
-- 39 blocked command patterns (Tier 1 security)
+- 39 blocked command patterns (Tier 1 security) + full-text code scanning (Tier 1+)
 - 5-stage pipeline with cross-model auditing (Sonnet writes, Opus reviews)
 - 3 deployment providers (GitHub Pages, Vercel, Firebase)
 

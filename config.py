@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-VERSION = "8.4.0"
+VERSION = "8.5.0"
 
 load_dotenv()
 

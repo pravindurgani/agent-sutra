@@ -99,8 +99,7 @@ class TestPhase1_CodeScannerEvasionDeep:
     # ── Payload B: importlib indirection ──────────────────────────────
 
     def test_payload_b_importlib_indirection(self):
-        """importlib.import_module('os') → getattr(mod, 'sys'+'tem') —
-        no contiguous 'os.system(' in source."""
+        """importlib.import_module('os') — CAUGHT by S-2 fix (v8.5.0)."""
         code = (
             'import importlib\n'
             'mod = importlib.import_module("o" + "s")\n'
@@ -108,71 +107,57 @@ class TestPhase1_CodeScannerEvasionDeep:
             'fn("rm -rf ~/important")'
         )
         result = self._run_check(code)
-        assert result is None, (
-            "Payload B (importlib) unexpectedly caught — "
-            f"scanner returned: {result}"
+        assert result is not None, (
+            "Payload B (importlib) must be caught by S-2 fix"
         )
 
     # ── Payload C: __import__ + getattr chain ─────────────────────────
 
     def test_payload_c_dunder_import_subprocess(self):
-        """__import__('sub'+'process').run(['rm','-rf','~/important']) —
-        uses split module name to avoid any blocked pattern."""
+        """__import__() — CAUGHT by S-2 fix (v8.5.0)."""
         code = (
             'mod = __import__("sub" + "process")\n'
             'mod.run(["rm", "-rf", "~/important"])'
         )
         result = self._run_check(code)
-        assert result is None, (
-            "Payload C (subprocess via __import__) unexpectedly caught — "
-            f"scanner returned: {result}"
+        assert result is not None, (
+            "Payload C (subprocess via __import__) must be caught by S-2 fix"
         )
 
     def test_payload_c_dunder_import_os(self):
-        """__import__("os").system("rm -rf ~/important") — the string
-        'os' and 'system' appear separately from the dot-call pattern."""
+        """__import__("os") — CAUGHT by S-2 fix (v8.5.0)."""
         code = '__import__("os").system("rm -rf ~/important")'
         result = self._run_check(code)
-        # This might be caught because 'os' might not match
-        # Actually: r"\bos\.system\s*\(" requires os.system( as a contiguous token
-        # But __import__("os").system( has __import__("os").system(
-        # The regex r"\bos\.system\s*\(" requires word-boundary 'os' then '.system('
-        # __import__("os").system does NOT have \bos\.system — it has ).system
-        assert result is None, (
-            "Payload C (__import__ os) unexpectedly caught"
+        assert result is not None, (
+            "Payload C (__import__ os) must be caught by S-2 fix"
         )
 
     # ── Pattern analysis: what would close these gaps ─────────────────
 
     def test_document_pattern_gaps(self):
-        """Document which patterns would need to be added to close
-        each bypass. This is a documentation test, not a security test."""
+        """Document remaining pattern gaps after S-2 fix (v8.5.0).
+        importlib and dunder-import are now covered. chr-obfuscation and getattr remain open."""
         from tools.sandbox import _CODE_BLOCKED_PATTERNS
 
-        # Current patterns that are relevant:
         patterns = [(p.pattern, label) for p, label in _CODE_BLOCKED_PATTERNS]
 
-        # Gap 1: No pattern catches exec() with string concatenation
-        has_exec_pattern = any("exec" in p for p, _ in patterns)
-        # Gap 2: No pattern catches importlib.import_module
+        # Remaining gap: chr() string obfuscation
+        has_chr_obfuscation_pattern = any("chr" in p for p, _ in patterns)
+        # Fixed (S-2): importlib.import_module now caught
         has_importlib_pattern = any("importlib" in p for p, _ in patterns)
-        # Gap 3: No pattern catches __import__
+        # Fixed (S-2): dunder-import now caught
         has_dunder_import_pattern = any("__import__" in p for p, _ in patterns)
-        # Gap 4: No pattern catches getattr(..., ...) with obfuscated names
+        # Remaining gap: getattr(..., ...) with obfuscated names
         has_getattr_pattern = any("getattr" in p for p, _ in patterns)
 
-        # Document the gaps (all should be False for current scanner)
-        gaps = {
-            "exec_pattern": has_exec_pattern,
-            "importlib_pattern": has_importlib_pattern,
-            "__import___pattern": has_dunder_import_pattern,
-            "getattr_pattern": has_getattr_pattern,
-        }
+        # S-2 fix closed importlib and dunder-import gaps
+        assert has_importlib_pattern, "importlib pattern must exist (S-2 fix)"
+        assert has_dunder_import_pattern, "dunder-import pattern must exist (S-2 fix)"
 
-        # At least 3 of 4 should be missing (confirming gaps exist)
-        missing_count = sum(1 for v in gaps.values() if not v)
-        assert missing_count >= 3, (
-            f"Expected at least 3 pattern gaps, found {missing_count}. Gaps: {gaps}"
+        # 2 remaining gaps: chr obfuscation and getattr indirection
+        remaining_gaps = sum(1 for v in [has_chr_obfuscation_pattern, has_getattr_pattern] if not v)
+        assert remaining_gaps >= 1, (
+            "Expected at least 1 remaining gap (chr obfuscation or getattr)"
         )
 
 

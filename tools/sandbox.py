@@ -50,6 +50,7 @@ def _clear_live_output(task_id: str):
 
 # ── Server registry (thread-safe) ─────────────────────────────────
 _running_servers: dict[str, dict] = {}  # task_id -> {"proc": Popen, "port": int, "started_at": float}
+_server_timers: dict[str, threading.Timer] = {}  # task_id -> Timer (cancellable auto-kill)
 _server_lock = threading.Lock()
 
 
@@ -125,13 +126,12 @@ def start_server(
             f"Server on port {port} did not respond within {config.SERVER_START_TIMEOUT}s"
         )
 
-    # Start auto-kill timer
-    timer = threading.Thread(
-        target=_auto_kill_timer,
-        args=(task_id, config.SERVER_MAX_LIFETIME),
-        daemon=True,
-    )
-    timer.start()
+    # Start cancellable auto-kill timer (R-1: avoids thread accumulation)
+    kill_timer = threading.Timer(config.SERVER_MAX_LIFETIME, _auto_kill_callback, args=(task_id,))
+    kill_timer.daemon = True
+    kill_timer.start()
+    with _server_lock:
+        _server_timers[task_id] = kill_timer
 
     url = f"http://127.0.0.1:{port}"
     logger.info("Server for task %s running at %s", task_id, url)
@@ -140,6 +140,8 @@ def start_server(
 
 def stop_server(task_id: str) -> bool:
     """Stop a running server by task_id.
+
+    Cancels the auto-kill timer (R-1) and kills the server process.
 
     Args:
         task_id: The task ID whose server should be stopped.
@@ -151,6 +153,11 @@ def stop_server(task_id: str) -> bool:
 
     with _server_lock:
         entry = _running_servers.pop(task_id, None)
+        timer = _server_timers.pop(task_id, None)
+
+    if timer is not None:
+        timer.cancel()
+
     if entry is None:
         return False
 
@@ -227,12 +234,11 @@ def _wait_for_http(port: int, timeout: int) -> bool:
     return False
 
 
-def _auto_kill_timer(task_id: str, lifetime: int):
-    """Background thread that kills a server after lifetime seconds."""
-    time.sleep(lifetime)
+def _auto_kill_callback(task_id: str):
+    """Called by threading.Timer when server lifetime expires (R-1)."""
     stopped = stop_server(task_id)
     if stopped:
-        logger.info("Auto-killed server for task %s after %ds", task_id, lifetime)
+        logger.info("Auto-killed server for task %s after %ds", task_id, config.SERVER_MAX_LIFETIME)
 
 
 # Docker availability cache (lazy-checked, refreshed every 60s)
@@ -344,10 +350,28 @@ def _filter_env() -> dict[str, str]:
 
 
 def _check_command_safety(command: str) -> str | None:
-    """Check for catastrophic commands (Tier 1). Returns error message or None."""
+    """Check for catastrophic commands (Tier 1). Returns error message or None.
+
+    Also scans the content of script files when the command executes bash/sh on a file,
+    preventing the bypass where dangerous patterns are hidden inside .sh files.
+    """
     for pattern in _BLOCKED_RE:
         if pattern.search(command):
             return f"BLOCKED: Catastrophic command pattern '{pattern.pattern}'. Refusing to execute."
+
+    # If command executes a shell script file, scan its content
+    try:
+        parts = shlex.split(command)
+        if len(parts) >= 2 and parts[0] in ("bash", "sh", "/bin/bash", "/bin/sh"):
+            script_path = Path(parts[-1])
+            if script_path.exists() and script_path.is_file():
+                content = script_path.read_text(errors="replace")
+                content_check = _check_shell_safety(content)
+                if content_check:
+                    return f"BLOCKED: Script file '{script_path.name}' contains dangerous patterns. {content_check}"
+    except (ValueError, OSError):
+        pass  # shlex parse failure or file read failure — continue
+
     # Log Tier 3 operations for audit trail
     for pattern, label in _LOGGED_PATTERNS:
         if pattern.search(command):
@@ -358,13 +382,20 @@ def _check_command_safety(command: str) -> str | None:
 # TIER 4: Code content patterns — scans Python code for dangerous operations
 # Defense-in-depth for subprocess mode; not applied in Docker mode (filesystem isolation)
 _CODE_BLOCKED_PATTERNS = [
-    # Reading SSH keys, GPG keys, credentials
+    # Reading SSH keys, GPG keys, credentials (quoted paths)
     (re.compile(r"""['"]~/?\.(ssh|gnupg|aws|kube|docker)/""", re.IGNORECASE), "credential directory access"),
     (re.compile(r"""['"].*\.env['"]"""), ".env file access"),
     (re.compile(r"""['"].*\.pem['"]"""), "PEM key file access"),
     (re.compile(r"""['"].*id_rsa['"]"""), "SSH key access"),
-    # os.system — should use subprocess.run() instead
-    (re.compile(r"\bos\.system\s*\(", re.IGNORECASE), "os.system call"),
+    # Reading credentials via unquoted path construction (S-3: bypasses quoted patterns)
+    (re.compile(r"Path\.home\(\).*\.(ssh|gnupg|aws|kube|docker)", re.IGNORECASE), "credential directory via Path.home()"),
+    (re.compile(r"expanduser\(.*\.(ssh|gnupg|aws|kube|docker)", re.IGNORECASE), "credential directory via expanduser"),
+    (re.compile(r"Path\.home\(\).*\.env\b", re.IGNORECASE), ".env file via Path.home()"),
+    # Dynamic import bypass for sandbox evasion (S-2)
+    (re.compile(r"\b__import__\s*\(", re.IGNORECASE), "dynamic __import__ call"),
+    (re.compile(r"\bimportlib\s*\.\s*import_module\s*\(", re.IGNORECASE), "importlib dynamic import"),
+    # Dangerous direct shell execution via os module
+    (re.compile(r"\bos\.system\s*\(", re.IGNORECASE), "direct shell execution via os"),
     # shutil.rmtree on home or root
     (re.compile(r"shutil\.rmtree\s*\(\s*['\"]?(/|~|Path\.home)", re.IGNORECASE), "recursive delete of home/root"),
     # Reverse shells — legitimate HTTP uses requests/httpx, not raw sockets
@@ -379,10 +410,58 @@ def _check_code_safety(code: str) -> str | None:
 
     Defense-in-depth for the subprocess execution path. NOT a security boundary.
     Not applied in Docker mode where filesystem isolation provides stronger protection.
+
+    Also scans the full code text against Tier 1 shell blocklist patterns. If "sudo",
+    "cat|bash", "rm -rf /", etc. appear ANYWHERE in generated Python code — in strings,
+    comments, or code — it is blocked. False positives are acceptable for Tier 1
+    catastrophic patterns since they should never appear in legitimate generated code.
     """
     for pattern, label in _CODE_BLOCKED_PATTERNS:
         if pattern.search(code):
             return f"BLOCKED: Code contains {label}. Refusing to execute in subprocess mode."
+
+    # Scan full code text against Tier 1 shell blocklist.
+    # Catches Python that writes .sh files with dangerous content (cat|bash, sudo),
+    # embeds dangerous commands in subprocess calls, or references blocked patterns
+    # in any context. Tier 1 patterns are catastrophic — false positives acceptable.
+    #
+    # Also expand escape sequences (\n, \t) so regex word boundaries work across
+    # string literal line breaks (e.g. "#!/bin/bash\ncat x | bash" → actual newline).
+    expanded = code.replace("\\n", "\n").replace("\\t", "\t")
+    for blocked in _BLOCKED_RE:
+        if blocked.search(code) or blocked.search(expanded):
+            return (
+                f"BLOCKED: Code contains shell pattern matching "
+                f"'{blocked.pattern}'. Refusing to execute."
+            )
+    return None
+
+
+# TIER 5: JavaScript-specific dangerous patterns (S-1)
+_JS_BLOCKED_PATTERNS = [
+    (re.compile(r"""\brequire\s*\(\s*['"]child_process['"]""", re.IGNORECASE), "child_process access"),
+    (re.compile(r"\bexecSync\s*\(", re.IGNORECASE), "synchronous shell exec"),
+    (re.compile(r"\bspawn(?:Sync)?\s*\(\s*['\"](?:bash|sh|rm|sudo)", re.IGNORECASE), "dangerous spawn"),
+    (re.compile(r"\bprocess\.env\b", re.IGNORECASE), "environment variable access"),
+    (re.compile(r"\bfs\.(?:unlink|rmdir|rm)\w*\b", re.IGNORECASE), "filesystem deletion"),
+    (re.compile(r"\beval\s*\(", re.IGNORECASE), "eval execution"),
+]
+
+
+def _check_js_safety(code: str) -> str | None:
+    """Scan JavaScript code for dangerous operations.
+
+    Checks JS-specific patterns (child_process, eval, fs deletion) and also
+    runs the full Tier 1 shell blocklist against the code text.
+    """
+    # Tier 1 shell patterns — catastrophic commands should never appear in JS
+    for pattern in _BLOCKED_RE:
+        if pattern.search(code):
+            return f"BLOCKED: JavaScript contains shell pattern '{pattern.pattern}'."
+    # JS-specific patterns
+    for pattern, label in _JS_BLOCKED_PATTERNS:
+        if pattern.search(code):
+            return f"BLOCKED: JavaScript contains {label}."
     return None
 
 
@@ -911,12 +990,26 @@ def run_code(
         return _run_code_docker(code, language, timeout, working_dir)
 
     # --- Subprocess path (original behavior) ---
-    # Lightweight code content scan (defense-in-depth, not a security boundary)
+    # Universal Tier 1 scan: catastrophic patterns blocked in ALL languages.
+    # These patterns (sudo, rm -rf ~, cat|bash, etc.) should never appear in
+    # generated code regardless of language, even inside string literals.
+    for pattern in _BLOCKED_RE:
+        if pattern.search(code):
+            logger.warning("Universal Tier 1 scan blocked %s code: pattern '%s'", language, pattern.pattern)
+            return ExecutionResult(
+                success=False,
+                stderr=f"BLOCKED: Generated code contains catastrophic pattern '{pattern.pattern}'. Refusing to execute.",
+            )
+
+    # Language-specific content scan (defense-in-depth, not a security boundary)
     if language == "python":
         safety_msg = _check_code_safety(code)
     elif language == "bash":
         safety_msg = _check_shell_safety(code)
+    elif language == "javascript":
+        safety_msg = _check_js_safety(code)
     else:
+        # WARNING: any new language added here MUST have a content scanner
         safety_msg = None
     if safety_msg:
         logger.warning("Code content blocked: %s", safety_msg)

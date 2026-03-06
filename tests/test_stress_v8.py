@@ -75,23 +75,23 @@ class TestCodeScannerEvasion:
 
     # ── importlib evasion ─────────────────────────────────────────────
 
-    def test_importlib_import_BYPASSES(self):
-        """importlib.import_module('os') → getattr('system') — EXPECTED BYPASS."""
+    def test_importlib_import_CAUGHT(self):
+        """importlib.import_module() — CAUGHT by S-2 fix (v8.5.0)."""
         code = (
             'import importlib\n'
             'mod = importlib.import_module("o" + "s")\n'
             'getattr(mod, "system")("echo pwned")'
         )
         result = self._run_check(code)
-        assert result is None, "Scanner catches importlib evasion (unexpected)"
+        assert result is not None, "Scanner must catch importlib.import_module (S-2 fix)"
 
     # ── __import__ evasion ────────────────────────────────────────────
 
-    def test_dunder_import_BYPASSES(self):
-        """__import__('os').system('cmd') — EXPECTED BYPASS."""
+    def test_dunder_import_CAUGHT(self):
+        """__import__() — CAUGHT by S-2 fix (v8.5.0)."""
         code = '__import__("os").system("echo pwned")'
         result = self._run_check(code)
-        assert result is None, "Scanner catches __import__ evasion (unexpected)"
+        assert result is not None, "Scanner must catch __import__ (S-2 fix)"
 
     # ── compile() + exec() ────────────────────────────────────────────
 

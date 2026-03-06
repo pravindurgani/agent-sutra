@@ -806,6 +806,18 @@ async def cmd_chain(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         files = list(previous_artifacts)
 
+        # Force literal execution: chain steps must NOT rewrite failing assertions
+        # into graceful reports. This prefix instructs the planner to execute exactly
+        # as written so that real pass/fail results flow back to the strict-AND gate.
+        chain_prefix = (
+            f"CHAIN STEP {i+1}/{len(steps)}: Execute this task EXACTLY as written. "
+            "Do NOT catch exceptions, do NOT handle errors gracefully, do NOT rewrite "
+            "failing assertions into passing ones. If the task says to assert something "
+            "that will fail, let the assertion crash the program. The chain depends on "
+            "real pass/fail results.\n\n"
+        )
+        pipeline_msg = chain_prefix + step_msg
+
         # DB lifecycle: track each step as its own task
         await db.create_task(step_id, user_id, step_msg)
         await update.message.reply_text(f"Step {i+1}/{len(steps)}: {step_msg[:100]}")
@@ -818,7 +830,7 @@ async def cmd_chain(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     run_task,
                     task_id=step_id,
                     user_id=user_id,
-                    message=step_msg,
+                    message=pipeline_msg,
                     files=files,
                     conversation_context=conversation_ctx,
                 ),
@@ -847,13 +859,21 @@ async def cmd_chain(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        # STRICT-AND GATE
-        if result.get("audit_verdict") != "pass":
-            feedback = result.get("audit_feedback", "Unknown")[:300]
+        # STRICT-AND GATE: exit-code based + audit verdict
+        # Check execution_result for non-zero exit code first — Claude can't fake this.
+        # Then check audit_verdict as secondary gate.
+        exec_result = result.get("execution_result", "")
+        exec_failed = exec_result.startswith("Execution: FAILED")
+
+        if exec_failed or result.get("audit_verdict") != "pass":
+            if exec_failed:
+                reason = "Execution returned non-zero exit code"
+            else:
+                reason = result.get("audit_feedback", "Unknown")[:300]
             await update.message.reply_text(
                 f"Chain halted at step {i+1}/{len(steps)}.\n\n"
                 f"Step failed: {step_msg[:100]}\n"
-                f"Reason: {feedback}\n\n"
+                f"Reason: {reason}\n\n"
                 f"Steps {i+2}-{len(steps)} were NOT executed.\n"
                 f"No artifacts from this step were forwarded."
             )

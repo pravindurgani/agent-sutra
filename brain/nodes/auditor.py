@@ -33,7 +33,13 @@ ONLY FAIL for:
 - Code that doesn't address the user's actual request
 - Missing output files when files were expected
 - Obvious logical errors in the output
-- Tracebacks indicating crashes"""
+- Tracebacks indicating crashes
+
+CRITICAL CHECK — Did the agent actually do what was asked?
+- If the task asked to import a specific library and the code imported a DIFFERENT library, that is a FAILURE
+- If the task asked to connect to a specific database/service and the code generated fake/sample data instead, that is a FAILURE
+- If the task asked for X and the agent did Y (even if Y is reasonable), the verdict must be FAIL
+- "Graceful degradation" is NOT success — if the core task couldn't be completed, verdict = fail"""
 
 AUDIT_CRITERIA = {
     "code": """

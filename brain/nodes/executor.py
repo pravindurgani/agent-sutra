@@ -15,6 +15,58 @@ from tools.file_manager import get_file_content
 
 logger = logging.getLogger(__name__)
 
+
+def _detect_truncation(code: str) -> bool:
+    """Check if generated code appears truncated by max_tokens limit.
+
+    Detects unclosed parentheses/brackets/braces, unclosed triple-quoted strings,
+    and lines ending mid-string. Used to avoid executing broken code and to
+    trigger a shorter re-generation instead.
+
+    Args:
+        code: The generated code string to check.
+
+    Returns:
+        True if the code appears truncated, False otherwise.
+    """
+    stripped = code.rstrip()
+    if not stripped:
+        return False
+
+    # Check for unclosed constructs (threshold > 2 to ignore minor formatting)
+    open_parens = stripped.count("(") - stripped.count(")")
+    open_brackets = stripped.count("[") - stripped.count("]")
+    open_braces = stripped.count("{") - stripped.count("}")
+
+    # Check for unclosed triple-quoted strings
+    triple_single = stripped.count("'''") % 2 != 0
+    triple_double = stripped.count('"""') % 2 != 0
+
+    # Check if last line has unclosed string (odd number of unescaped quotes)
+    last_line = stripped.split("\n")[-1]
+    # Count unescaped single/double quotes on last line
+    unescaped_singles = len(re.findall(r"(?<!\\)'", last_line))
+    unescaped_doubles = len(re.findall(r'(?<!\\)"', last_line))
+    ends_mid_string = (unescaped_singles % 2 != 0) or (unescaped_doubles % 2 != 0)
+
+    truncated = (
+        open_parens > 2
+        or open_brackets > 2
+        or open_braces > 2
+        or triple_single
+        or triple_double
+        or ends_mid_string
+    )
+
+    if truncated:
+        logger.warning(
+            "Code appears truncated: parens=%d brackets=%d braces=%d "
+            "triple_single=%s triple_double=%s ends_mid_string=%s",
+            open_parens, open_brackets, open_braces,
+            triple_single, triple_double, ends_mid_string,
+        )
+    return truncated
+
 CODE_GEN_SYSTEM = """You are an expert programmer. Given a plan, write complete, working code.
 
 Rules:
@@ -448,6 +500,27 @@ def _execute_code(state: AgentState) -> dict:
             "artifacts": [],
         }
 
+    # Truncation recovery: if code appears cut off by max_tokens, request shorter version
+    if _detect_truncation(code):
+        logger.warning("Truncated code detected for task %s, requesting shorter version", state["task_id"])
+        shorter_prompt = (
+            f"The previous code was too long and got truncated. Rewrite it more concisely "
+            f"— under 200 lines. Simplify the approach.\n\nOriginal task: {state['message'][:500]}"
+        )
+        code = claude_client.call(shorter_prompt, system=system, max_tokens=4096, thinking=True)
+        code = _strip_markdown_blocks(code)
+        # If still truncated, try once more with minimal version
+        if _detect_truncation(code):
+            logger.warning("Still truncated for task %s, requesting minimal version", state["task_id"])
+            code = claude_client.call(
+                f"Write the MINIMAL working version. Under 100 lines. No comments. "
+                f"No docstrings. {state['message'][:300]}",
+                system=system,
+                max_tokens=4096,
+                thinking=True,
+            )
+            code = _strip_markdown_blocks(code)
+
     timeout = _estimate_timeout(state)
     working_dir = _determine_working_dir(state)
     result = run_code_with_auto_install(code, timeout=timeout, working_dir=working_dir, task_id=state["task_id"])
@@ -503,6 +576,17 @@ def _execute_html_generation(
             "execution_result": f"Execution: FAILED\nErrors:\n{log_label} generation returned empty",
             "artifacts": [],
         }
+
+    # Truncation recovery: if HTML appears cut off, request shorter version
+    if _detect_truncation(code):
+        logger.warning("Truncated %s detected for task %s, requesting shorter version", log_label, state["task_id"])
+        shorter_prompt = (
+            f"The previous HTML was too long and got truncated. Rewrite it more concisely. "
+            f"Use inline styles, minimize CSS, keep it under 500 lines.\n\n"
+            f"Original task: {state['message'][:500]}"
+        )
+        code = claude_client.call(shorter_prompt, system=system, max_tokens=max_tokens, thinking=True)
+        code = _strip_markdown_blocks(code)
 
     # Save the HTML file with UUID suffix to prevent TOCTOU race
     message = state.get("message", filename_base)
@@ -590,15 +674,32 @@ def _strip_markdown_blocks(text: str) -> str:
 
 
 def _extract_declared_artifacts(stdout: str, working_dir: Path) -> list[str]:
-    """Extract artifacts declared by the script via ARTIFACTS: line."""
+    """Extract artifacts declared by the script via ARTIFACTS: line.
+
+    Validates that each path resolves to within working_dir (L-3/L-7:
+    prevents LLM-declared paths like '../../.env' from leaking files).
+    """
     match = re.search(r"^ARTIFACTS:\s*(\[.*\])\s*$", stdout, re.MULTILINE)
     if not match:
         return []
     try:
         names = json.loads(match.group(1))
-        return [str(working_dir / n) for n in names if (working_dir / n).exists()]
     except (json.JSONDecodeError, TypeError):
         return []
+
+    resolved_root = working_dir.resolve()
+    artifacts = []
+    for name in names:
+        full_path = (working_dir / name).resolve()
+        # Path traversal check — artifact must stay within working_dir
+        try:
+            full_path.relative_to(resolved_root)
+        except ValueError:
+            logger.warning("Artifact path traversal blocked: '%s' escapes %s", name, resolved_root)
+            continue
+        if full_path.exists() and full_path.is_file():
+            artifacts.append(str(full_path))
+    return artifacts
 
 
 def _format_result(result: ExecutionResult) -> str:

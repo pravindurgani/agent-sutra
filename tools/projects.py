@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import logging
 from pathlib import Path
 from typing import Optional
@@ -52,7 +53,12 @@ def match_project(message: str) -> Optional[dict]:
         triggers = project.get("triggers", [])
         score = 0
         for trigger in triggers:
-            if trigger.lower() in msg_lower:
+            trig_lower = trigger.lower()
+            # A-36: Use word-boundary regex for short triggers to prevent false matches
+            if len(trig_lower) < 4:
+                if re.search(rf'\b{re.escape(trig_lower)}\b', msg_lower):
+                    score = max(score, len(trigger))
+            elif trig_lower in msg_lower:
                 # Longer trigger matches are more specific = higher score
                 score = max(score, len(trigger))
 

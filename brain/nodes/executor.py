@@ -82,13 +82,12 @@ Rules:
 - Print "ALL ASSERTIONS PASSED" if all checks succeed
 - Handle errors gracefully with try/except
 
-SYSTEM ACCESS: You have full access. You can:
-- pip install any library (import subprocess; subprocess.run(["pip3", "install", "package"]))
-- Download files via requests, curl, wget
+SYSTEM ACCESS:
+- Libraries are auto-installed if missing (do NOT install manually)
+- Download files via requests, httpx, or urllib
 - Access the internet for APIs, web scraping, search
-- Read/write files anywhere in the home directory
-- Call Ollama at http://localhost:11434 for local AI inference
-If a library isn't installed, install it as the first step of your script."""
+- Read/write files in the current working directory only
+- Call Ollama at http://localhost:11434 for local AI inference"""
 
 ANALYSIS_SYSTEM = """You are an expert data analyst. Given a plan and data file paths, write complete Python code.
 
@@ -250,8 +249,9 @@ def _bootstrap_project_deps(project_path: str, venv_path: str | None = None) -> 
     pip_bin = f"{venv_path}/bin/pip" if venv_path else "pip3"
 
     logger.info("Bootstrapping project dependencies from %s", req_file)
+    # A-7: Quote paths to prevent shell injection via spaces/metacharacters
     result = run_shell(
-        f"{pip_bin} install -r {req_file} --quiet",
+        f"{shlex.quote(pip_bin)} install -r {shlex.quote(str(req_file))} --quiet",
         working_dir=project_path,
         timeout=120,
         venv_path=venv_path,
@@ -278,7 +278,12 @@ def _parse_import_error_from_result(result: ExecutionResult) -> str | None:
     if not match:
         return None
     module = match.group(1)
-    return _PIP_NAME_MAP.get(module, module)
+    pip_name = _PIP_NAME_MAP.get(module, module)
+    # Validate package name to prevent pip install injection (S-4/S-5)
+    if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9._-]*$', pip_name):
+        logger.warning("Invalid package name rejected: %s", pip_name)
+        return None
+    return pip_name
 
 
 def _execute_project(state: AgentState) -> dict:
@@ -329,19 +334,21 @@ def _execute_project(state: AgentState) -> dict:
     for name, cmd in raw_commands.items():
         filled = cmd
         for k, v in params.items():
+            # S-6: validate param key to prevent injection via LLM-controlled keys
+            if not re.match(r'^[a-zA-Z0-9_-]+$', k):
+                logger.warning("Invalid parameter key rejected: %s", k)
+                continue
             filled = filled.replace(f"{{{k}}}", shlex.quote(str(v)))
         filled_commands[name] = filled
 
-    # Ask Claude to generate the exact shell commands from the plan
+    # A-18: Only send filled (quoted) commands to Claude — raw params removed
     prompt = f"""Plan:\n{plan}\n\nOriginal task: {state['message']}
 
 Project path: {project_path}
-Available commands (raw templates): {raw_commands}
-Extracted parameters: {params}
 Commands with parameters filled in: {filled_commands}
 Venv path: {venv or 'None'}
 
-IMPORTANT: Use the filled-in commands above. Do NOT leave {{file}} or {{client}} as placeholders."""
+IMPORTANT: Use the commands above EXACTLY as shown. Do NOT leave {{file}} or {{client}} as placeholders."""
 
     if state.get("files"):
         prompt += "\n\nUploaded files (use these exact paths):"
@@ -437,8 +444,14 @@ def _determine_working_dir(state: AgentState) -> Path | None:
     if state.get("working_dir"):
         wd = Path(state["working_dir"])
         if wd.is_absolute():
-            wd.mkdir(parents=True, exist_ok=True)
-            return wd
+            # A-8: Apply same workspace validation as message-extracted paths
+            resolved = wd.resolve()
+            workspace_root = config.WORKSPACE_DIR.resolve()
+            if not str(resolved).startswith(str(workspace_root)):
+                logger.warning("State working_dir %s not under workspace, ignoring", wd)
+            else:
+                wd.mkdir(parents=True, exist_ok=True)
+                return wd
 
     # 2. If message or plan mentions a specific path, extract it
     for text in [state.get("plan", ""), state.get("message", "")]:
@@ -446,11 +459,16 @@ def _determine_working_dir(state: AgentState) -> Path | None:
         if match:
             candidate = Path(match.group(1)).expanduser()
             try:
-                candidate.resolve().relative_to(config.HOST_HOME.resolve())
-                # Treat as directory if no suffix or already exists as a directory
-                if not candidate.suffix or candidate.is_dir():
-                    candidate.mkdir(parents=True, exist_ok=True)
-                    return candidate
+                resolved = candidate.resolve()
+                # L-10: Allow only workspace or project directories, not arbitrary HOME paths
+                allowed_roots = [config.WORKSPACE_DIR.resolve()]
+                # Also allow project paths from state if available
+                if any(str(resolved).startswith(str(root)) for root in allowed_roots):
+                    if not candidate.suffix or candidate.is_dir():
+                        candidate.mkdir(parents=True, exist_ok=True)
+                        return candidate
+                else:
+                    logger.warning("Working dir %s not under workspace, ignoring", candidate)
             except (ValueError, OSError):
                 pass
 
@@ -502,6 +520,8 @@ def _execute_code(state: AgentState) -> dict:
 
     # Truncation recovery: if code appears cut off by max_tokens, request shorter version
     if _detect_truncation(code):
+        # L-8: Budget note — truncation recovery adds at most 2 API calls.
+        # This is bounded and acceptable; full budget enforcement happens in claude_client.
         logger.warning("Truncated code detected for task %s, requesting shorter version", state["task_id"])
         shorter_prompt = (
             f"The previous code was too long and got truncated. Rewrite it more concisely "
@@ -661,15 +681,17 @@ def _strip_markdown_blocks(text: str) -> str:
                 in_block = True
                 current_block = []
         else:
-            if stripped == "```":
+            # A-19: Accept closing fence with trailing whitespace or bare ```
+            if stripped == "```" or (stripped.startswith("```") and stripped[3:].strip() == ""):
                 blocks.append("\n".join(current_block))
                 in_block = False
                 current_block = []
             else:
                 current_block.append(line)
 
+    # A-19: Return first valid block (not longest) to prevent gaming
     if blocks:
-        return max(blocks, key=len).strip()
+        return blocks[0].strip()
     return text.strip()
 
 

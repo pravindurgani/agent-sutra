@@ -145,18 +145,26 @@ def audit(state: AgentState) -> dict:
     criteria = AUDIT_CRITERIA.get(task_type, AUDIT_CRITERIA["code"])
     system = SYSTEM_BASE + "\n" + criteria
 
+    # A-21: Take LAST 5000 chars (tail) — tracebacks appear at end, not beginning
+    exec_result_raw = state.get('execution_result', 'N/A')
+    exec_result_truncated = exec_result_raw[-5000:] if len(exec_result_raw) > 5000 else exec_result_raw
+
+    # A-20: Wrap all injected content in XML tags for structural separation
     prompt = f"""Original task: {state['message']}
 
 Task type: {task_type}
 
-Plan:
+<plan>
 {state.get('plan', 'N/A')[:3000]}
+</plan>
 
-Generated code:
+<generated_code>
 {state.get('code', 'N/A')[:5000]}
+</generated_code>
 
-Execution result:
-{state.get('execution_result', 'N/A')[:5000]}"""
+<execution_output>
+{exec_result_truncated}
+</execution_output>"""
 
     # Include extracted parameters for project tasks
     if task_type == "project" and state.get("extracted_params"):
@@ -200,7 +208,8 @@ Execution result:
         if json_match:
             verdict = json_match.get("verdict", "fail")
             feedback = json_match.get("feedback", response)
-        elif "pass" in response.lower()[:50]:
+        elif '"pass"' in response.lower()[:50]:
+            # A-9: Only match explicit "pass" in quotes — no startswith("pass") fallback
             verdict = "pass"
             feedback = response
         else:

@@ -571,9 +571,10 @@ class TestCodeContentScanner:
         code = "plt.savefig('chart.png')"
         assert _check_code_safety(code) is None
 
-    def test_subprocess_pip_allowed(self):
+    def test_subprocess_now_blocked(self):
+        """A-5: subprocess.* is now blocked in code scanner."""
         code = 'subprocess.run(["pip3", "install", "pandas"])'
-        assert _check_code_safety(code) is None
+        assert _check_code_safety(code) is not None
 
 
 # ── Embedded shell content in Python code (v8.4.1) ───────────────
@@ -650,15 +651,15 @@ print("hello")
 '''
         assert _check_code_safety(code) is not None
 
-    def test_python_writing_safe_script_allowed(self):
-        """Python code writing safe shell content (echo, mkdir) is allowed."""
+    def test_python_writing_safe_script_blocked_by_subprocess(self):
+        """A-5: subprocess.run is now blocked even with safe commands."""
         code = '''
 from pathlib import Path
 import subprocess
 Path("setup.sh").write_text("#!/bin/bash\\necho hello\\nmkdir -p output")
 subprocess.run(["bash", "setup.sh"])
 '''
-        assert _check_code_safety(code) is None
+        assert _check_code_safety(code) is not None
 
     def test_python_normal_strings_allowed(self):
         """Normal Python string usage is not blocked."""
@@ -669,14 +670,14 @@ print(f"Creating {filename}: {message}")
 '''
         assert _check_code_safety(code) is None
 
-    def test_python_safe_subprocess_allowed(self):
-        """Python subprocess with safe commands is allowed."""
+    def test_python_subprocess_now_blocked(self):
+        """A-5: All subprocess.* calls are now blocked in code scanner."""
         code = '''
 import subprocess
 subprocess.run(["python3", "main.py"], capture_output=True)
 subprocess.run(["npm", "run", "build"])
 '''
-        assert _check_code_safety(code) is None
+        assert _check_code_safety(code) is not None
 
 
 class TestCommandSafetyScriptFileScanning:

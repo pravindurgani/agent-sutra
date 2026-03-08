@@ -168,7 +168,7 @@ AgentSutra/
 │       └── deliverer.py     # Formats, deploys, and sends results
 ├── bot/
 │   ├── telegram_bot.py      # Bot factory + command registration
-│   └── handlers.py          # 16 command handlers + auth
+│   └── handlers.py          # 18 command handlers + auth
 ├── tools/
 │   ├── claude_client.py     # Anthropic API wrapper + cost tracking
 │   ├── sandbox.py           # Code execution + server management
@@ -179,7 +179,7 @@ AgentSutra/
 │   └── projects.py          # YAML project registry loader
 ├── storage/db.py            # SQLite with WAL mode
 ├── scheduler/cron.py        # APScheduler with SQLite persistence
-├── tests/                   # 22 test files
+├── tests/                   # 24 test files
 ├── projects.yaml            # Your registered projects
 └── .env.example             # Configuration template
 ```
@@ -216,6 +216,8 @@ AgentSutra/
 | `/deploy <id>` | Manually deploy a task's frontend artifacts |
 | `/servers` | List running local preview servers |
 | `/stopserver` | Stop a server by task ID or stop all |
+| `/retry` | Re-run failed/crashed tasks with same input |
+| `/setup` | Validate system configuration (env, Ollama, projects, DB) |
 | `/usage` | Lifetime API token counts |
 
 ---
@@ -228,12 +230,13 @@ AgentSutra gives an LLM direct access to your machine. The security model is **d
 |-------|-------------|
 | **Authentication** | Telegram user ID allowlist. Unauthorized users silently ignored. |
 | **Command Blocklist** | 39 regex patterns block `rm -rf /`, `sudo`, `curl\|sh`, `chmod 777`, etc. |
-| **Code Scanner** | Scans generated Python and bash scripts for credential reads, dangerous syscalls. |
+| **Code Scanner** | 51 patterns scan Python/JS for credential reads, exec/eval, subprocess, os.popen, ctypes, base64 decode, obfuscation. |
 | **Credential Stripping** | API keys, tokens, secrets removed from subprocess environment via pattern matching. |
 | **Docker Isolation** | Optional hard filesystem boundary. Only `workspace/` is mounted read-write. |
-| **Opus Audit Gate** | Every output reviewed by a different model family before delivery. |
-| **Visual Verification** | Optional Playwright check that generated pages actually load and render. |
-| **Budget Enforcement** | Daily/monthly API spend caps checked before every call. |
+| **Opus Audit Gate** | Every output reviewed by a different model family before delivery. XML-delimited prompts resist injection. |
+| **Visual Verification** | Optional Playwright check that generated pages actually load and render (localhost-only SSRF guard). |
+| **Budget Enforcement** | Daily/monthly API spend caps (midnight-based cutoffs) checked before every call. |
+| **Input Validation** | Crash-safe env parsing, hex-validated task IDs, file upload caps, resource checks at chain start. |
 
 ---
 

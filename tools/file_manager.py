@@ -102,6 +102,10 @@ def get_file_metadata(path: Path) -> dict:
 
         elif path.suffix == ".json":
             import json
+            # A-25: Cap JSON loading at 10MB to prevent OOM on large files
+            if size > 10 * 1024 * 1024:
+                meta["columns"] = [f"(JSON too large for metadata: {size_human})"]
+                return meta
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             if isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):

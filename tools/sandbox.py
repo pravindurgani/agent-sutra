@@ -100,6 +100,12 @@ def start_server(
         port = _find_free_port()
 
     resolved_cmd = command.replace("{port}", str(port))
+
+    # A-1: Safety check server commands through Tier 1 blocklist
+    safety_msg = _check_command_safety(resolved_cmd)
+    if safety_msg:
+        raise RuntimeError(f"Server command blocked: {safety_msg}")
+
     logger.info("Starting server for task %s on port %d: %s", task_id, port, resolved_cmd)
 
     proc = subprocess.Popen(
@@ -109,6 +115,7 @@ def start_server(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         start_new_session=True,
+        env=_filter_env(),  # A-1: Strip credentials from server env
     )
 
     with _server_lock:
@@ -362,13 +369,21 @@ def _check_command_safety(command: str) -> str | None:
     # If command executes a shell script file, scan its content
     try:
         parts = shlex.split(command)
-        if len(parts) >= 2 and parts[0] in ("bash", "sh", "/bin/bash", "/bin/sh"):
+        if len(parts) >= 2 and parts[0] in ("bash", "sh", "zsh", "/bin/bash", "/bin/sh", "/bin/zsh"):
             script_path = Path(parts[-1])
             if script_path.exists() and script_path.is_file():
                 content = script_path.read_text(errors="replace")
                 content_check = _check_shell_safety(content)
                 if content_check:
                     return f"BLOCKED: Script file '{script_path.name}' contains dangerous patterns. {content_check}"
+        # Also catch: source script.sh, . script.sh
+        if len(parts) >= 2 and parts[0] in ("source", "."):
+            script_path = Path(parts[1])
+            if script_path.exists() and script_path.is_file():
+                content = script_path.read_text(errors="replace")
+                content_check = _check_shell_safety(content)
+                if content_check:
+                    return f"BLOCKED: Sourced file '{script_path.name}' contains dangerous patterns. {content_check}"
     except (ValueError, OSError):
         pass  # shlex parse failure or file read failure — continue
 
@@ -402,6 +417,21 @@ _CODE_BLOCKED_PATTERNS = [
     (re.compile(r"socket\..*connect\s*\(", re.IGNORECASE), "outbound socket connection"),
     # Reading /etc/passwd, /etc/shadow
     (re.compile(r"""open\s*\(\s*['"]/etc/(passwd|shadow|sudoers)""", re.IGNORECASE), "system file read"),
+    # A-2: Block import of config module (exposes API keys at runtime)
+    (re.compile(r"\bimport\s+config\b"), "config module import (credential exposure)"),
+    (re.compile(r"\bfrom\s+config\s+import\b"), "config module import (credential exposure)"),
+    # A-3: os.popen -- shell access not covered by os.system block
+    (re.compile(r"\bos\.popen\s*\(", re.IGNORECASE), "shell via os.popen"),
+    # A-4: dynamic code bypasses all static scanning
+    (re.compile(r"(?<!\w)exec\s*\("), "dynamic code via exec()"),
+    (re.compile(r"(?<!\w)eval\s*\("), "dynamic code via eval()"),
+    # A-5: subprocess.* methods
+    (re.compile(r"\bsubprocess\.\w+\s*\("), "subprocess call"),
+    # A-6: Runtime string construction / obfuscation
+    (re.compile(r"\bgetattr\s*\(\s*os\b"), "getattr on os module"),
+    (re.compile(r"\bbase64\.\w*decode\s*\("), "base64 decode"),
+    (re.compile(r"\bctypes\b"), "ctypes access"),
+    (re.compile(r"chr\(\d+\)\s*\+\s*chr\(\d+\)\s*\+\s*chr\(\d+\)"), "chr() chain obfuscation"),
 ]
 
 
@@ -445,6 +475,7 @@ _JS_BLOCKED_PATTERNS = [
     (re.compile(r"\bprocess\.env\b", re.IGNORECASE), "environment variable access"),
     (re.compile(r"\bfs\.(?:unlink|rmdir|rm)\w*\b", re.IGNORECASE), "filesystem deletion"),
     (re.compile(r"\beval\s*\(", re.IGNORECASE), "eval execution"),
+    (re.compile(r"""\brequire\s*\(\s*['"]fs['"]\s*\)\s*\.\s*(?:unlink|rmdir|rm|writeFile)\w*""", re.IGNORECASE), "chained fs destructive call"),
 ]
 
 
@@ -1032,6 +1063,7 @@ def run_code(
             f.write(code)
             script_path = Path(f.name)
 
+        # S-9: Interpreter is hardcoded — never from LLM output. Safe.
         if language == "python":
             python_bin = f"{venv_path}/bin/python3" if venv_path else "python3"
             cmd = [python_bin, "-u", str(script_path)]
@@ -1048,6 +1080,7 @@ def run_code(
 
         if task_id:
             _register_live_output(task_id)
+        proc = None
         try:
             proc = subprocess.Popen(
                 cmd, stdin=subprocess.DEVNULL,
@@ -1080,6 +1113,13 @@ def run_code(
                     import signal
                     os.killpg(proc.pid, signal.SIGKILL)
                     proc.wait()
+                    # R-2: Close pipes so reader threads unblock from readline()
+                    if proc.stdout:
+                        proc.stdout.close()
+                    if proc.stderr:
+                        proc.stderr.close()
+                    t_out.join(timeout=2)
+                    t_err.join(timeout=2)
                     logger.warning("Execution timed out after %ds, killed process group %d", timeout, proc.pid)
                     return ExecutionResult(success=False, stderr=f"Execution timed out after {timeout}s", timed_out=True)
                 time.sleep(0.1)
@@ -1105,6 +1145,14 @@ def run_code(
                 return_code=proc.returncode,
             )
         finally:
+            # R-3: Ensure subprocess is killed if still running on error
+            if proc is not None and proc.poll() is None:
+                try:
+                    import signal
+                    os.killpg(proc.pid, signal.SIGKILL)
+                    proc.wait(timeout=5)
+                except Exception:
+                    pass
             if task_id:
                 _clear_live_output(task_id)
     except Exception as e:
@@ -1153,8 +1201,9 @@ def run_code_with_auto_install(
             install_result = _docker_pip_install(missing)
         else:
             pip_bin = f"{venv_path}/bin/pip" if venv_path else "pip3"
+            # A-10: --only-binary :all: prevents setup.py execution (supply-chain vector)
             install_result = run_shell(
-                f"{pip_bin} install {shlex.quote(missing)}",
+                f"{pip_bin} install --only-binary :all: {shlex.quote(missing)}",
                 working_dir=str(working_dir or config.OUTPUTS_DIR),
                 timeout=120,
             )
@@ -1214,6 +1263,9 @@ def run_shell(
 
     parts.append(command)
     full_command = " && ".join(parts)
+    # S-7: Safety check runs on `command` (line 1202), not `full_command`.
+    # The only prefix added is venv activation (safe by construction).
+    # If other prefixes are ever added here, they must also be checked.
 
     # Protected env: strip only AgentSutra's own credentials
     env = _filter_env()
@@ -1226,6 +1278,7 @@ def run_shell(
 
     if task_id:
         _register_live_output(task_id)
+    proc = None
     try:
         proc = subprocess.Popen(
             full_command, shell=True, stdin=subprocess.DEVNULL,
@@ -1258,6 +1311,13 @@ def run_shell(
                 import signal
                 os.killpg(proc.pid, signal.SIGKILL)
                 proc.wait()
+                # R-2: Close pipes so reader threads unblock from readline()
+                if proc.stdout:
+                    proc.stdout.close()
+                if proc.stderr:
+                    proc.stderr.close()
+                t_out.join(timeout=2)
+                t_err.join(timeout=2)
                 logger.warning("Shell command timed out after %ds, killed process group %d", timeout, proc.pid)
                 return ExecutionResult(success=False, stderr=f"Timed out after {timeout}s", timed_out=True)
             time.sleep(0.1)
@@ -1285,6 +1345,14 @@ def run_shell(
         logger.error("Shell execution error: %s", e)
         return ExecutionResult(success=False, stderr=str(e))
     finally:
+        # R-3: Ensure subprocess is killed if still running on error
+        if proc is not None and proc.poll() is None:
+            try:
+                import signal
+                os.killpg(proc.pid, signal.SIGKILL)
+                proc.wait(timeout=5)
+            except Exception:
+                pass
         if task_id:
             _clear_live_output(task_id)
 

@@ -216,17 +216,17 @@ class TestTemporalSequenceMining:
         assert result is None  # Only 1 occurrence, threshold is 2
 
     def test_tasks_far_apart_returns_none(self, tasks_db):
-        """Follow-up tasks >30 min apart → not a sequence → returns None."""
+        """Follow-up tasks >2 hours apart → not a sequence → returns None."""
         from brain.nodes.deliverer import _suggest_next_step
 
         base = datetime(2026, 2, 1, 10, 0, 0, tzinfo=timezone.utc)
         for i in range(3):
-            offset = timedelta(hours=i * 2)
+            offset = timedelta(hours=i * 6)
             t1_created = (base + offset).isoformat()
             t1_completed = (base + offset + timedelta(minutes=5)).isoformat()
-            # Follow-up is 2 hours later — well beyond 30 min window
-            t2_created = (base + offset + timedelta(hours=2)).isoformat()
-            t2_completed = (base + offset + timedelta(hours=2, minutes=5)).isoformat()
+            # Follow-up is 3 hours later — beyond 2-hour temporal window
+            t2_created = (base + offset + timedelta(hours=3)).isoformat()
+            t2_completed = (base + offset + timedelta(hours=3, minutes=5)).isoformat()
 
             self._insert_task(
                 tasks_db, f"t1-{i}", 123, "scrape jobs for JobScraper", "project",

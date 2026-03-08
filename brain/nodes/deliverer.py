@@ -162,6 +162,10 @@ Files generated: {', '.join(Path(f).name for f in artifacts if Path(f).exists())
         if suggestion:
             summary += f"\n\n{suggestion}"
 
+    # L-12: Ensure total response stays within Telegram message limit
+    if len(summary) > config.TELEGRAM_MAX_MESSAGE_LENGTH - 200:
+        summary = summary[:config.TELEGRAM_MAX_MESSAGE_LENGTH - 200] + "\n\n(truncated)"
+
     _write_debug_sidecar(state)
 
     return {"final_response": summary, "artifacts": artifacts, "deploy_url": deploy_url}
@@ -239,7 +243,7 @@ def _suggest_next_step(project_name: str, user_id: int) -> str | None:
         FROM tasks t1
         JOIN tasks t2 ON t2.user_id = t1.user_id
             AND t2.created_at > t1.completed_at
-            AND julianday(t2.created_at) - julianday(t1.completed_at) < 0.0208
+            AND julianday(t2.created_at) - julianday(t1.completed_at) < 0.0833
             AND t2.task_type = 'project'
             AND t2.status = 'completed'
         WHERE t1.user_id = ?

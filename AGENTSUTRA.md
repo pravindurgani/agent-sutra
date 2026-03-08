@@ -1,8 +1,8 @@
-# AgentSutra v8.4.1 - Complete Project Documentation
+# AgentSutra v8.6.0 - Complete Project Documentation
 
-A Telegram-driven AI agent server running on Mac Mini M2 (16GB). Receives tasks via Telegram, processes them through a LangGraph Plan-Execute-Audit pipeline powered by Claude API, and delivers results back. Features: project registry with shared auto-managed venv, cross-model adversarial auditing (Sonnet+Opus), full internet access, local AI orchestration (Ollama), big data processing, production frontend generation, Docker container isolation for code execution, static deployment (GitHub Pages, Vercel, Firebase Hosting), local server preview with auto-kill, Playwright visual verification, 7 task types, 16 commands, budget enforcement, RAM guards, code content scanner, 39-pattern command blocklist, fabrication detection, truncation recovery, environment error detection, project dependency bootstrapping, streaming for extended thinking, honest failure delivery, cross-task memory, model routing, task chaining, and 602+ automated tests.
+A Telegram-driven AI agent server running on Mac Mini M2 (16GB). Receives tasks via Telegram, processes them through a LangGraph Plan-Execute-Audit pipeline powered by Claude API, and delivers results back. Features: project registry with shared auto-managed venv, cross-model adversarial auditing (Sonnet+Opus), full internet access, local AI orchestration (Ollama), big data processing, production frontend generation, Docker container isolation for code execution, static deployment (GitHub Pages, Vercel, Firebase Hosting), local server preview with auto-kill, Playwright visual verification, 7 task types, 18 commands, budget enforcement with cost analytics, RAM guards, code content scanner with 51 patterns (Tier 4 + Tier 5 JS), 39-pattern command blocklist, fabrication detection, truncation recovery, environment error detection, project dependency bootstrapping, streaming for extended thinking, honest failure delivery, partial result preservation, cross-task memory, model routing, task chaining, task retry, system setup validation, and 625+ automated tests.
 
-**Last updated:** 2026-03-07
+**Last updated:** 2026-03-08
 
 ---
 
@@ -69,7 +69,7 @@ Every architectural decision in this codebase was made through the lens of: **"W
          |
     [Telegram Bot API]
          |
-    [bot/telegram_bot.py]        Entry point: 16 commands, file handlers
+    [bot/telegram_bot.py]        Entry point: 18 commands, file handlers
          |
     [bot/handlers.py]            Auth, streaming status, file routing
          |                            |
@@ -134,8 +134,8 @@ AgentSutra/
 |
 |-- bot/                        # Telegram bot layer
 |   |-- __init__.py
-|   |-- telegram_bot.py         # Bot application setup, 16 command handlers + 3 message handlers
-|   +-- handlers.py             # 16 command handlers + 3 message handlers, resource guards, streaming status
+|   |-- telegram_bot.py         # Bot application setup, 18 command handlers + 3 message handlers
+|   +-- handlers.py             # 18 command handlers + 3 message handlers, resource guards, streaming status
 |
 |-- brain/                      # LangGraph agent pipeline
 |   |-- __init__.py
@@ -151,7 +151,7 @@ AgentSutra/
 |
 |-- tools/                      # Shared utilities
 |   |-- __init__.py
-|   |-- claude_client.py        # Anthropic SDK wrapper with retry, usage tracking
+|   |-- claude_client.py        # Anthropic SDK wrapper with retry, usage tracking, cost analytics
 |   |-- sandbox.py              # Subprocess execution: run_code() + run_shell() + server management
 |   |-- deployer.py             # Static deployment: GitHub Pages, Vercel, Firebase Hosting
 |   |-- visual_check.py         # Playwright headless visual verification
@@ -168,7 +168,7 @@ AgentSutra/
 |   |-- __init__.py
 |   +-- cron.py                 # APScheduler with SQLite-backed job store
 |
-|-- tests/                      # 561+ automated tests (v8.4)
+|-- tests/                      # 661 automated tests (v8.6)
 |   |-- __init__.py
 |   |-- test_sandbox.py         # 174 tests: blocked patterns (30), allowed cmds (13), working dir (4), pip mapping (6), import parsing (7), interpreter blocking (7), find blocking (5), encoding bypass (3), home move blocking (4), dotfile protection (9), env filtering (6), traceback extraction (4), pipe-to-shell (6), eval (2), bash string splitting (4), code scanner (14), file detection (6), artifact filter (26), walk artifacts (6), artifact sanity check (3), stdout fallback (7), stdin devnull (2)
 |   |-- test_executor.py        # 34 tests: markdown extraction (10), timeout estimation (4), param extraction (4), import error parsing (12), dependency bootstrapping (4)
@@ -193,7 +193,9 @@ AgentSutra/
 |-- scripts/                    # Utility scripts
 |   |-- secure_deploy.sh        # Deployment hardening script
 |   |-- build_sandbox.sh        # Build Docker sandbox image
-|   +-- monthly_maintenance.sh  # SQLite VACUUM, pip-cache cleanup, Docker prune
+|   |-- monthly_maintenance.sh  # SQLite VACUUM, pip-cache cleanup, Docker prune
+|   |-- com.agentsutra.bot.plist  # launchd service (auto-start/restart)
+|   +-- install_service.sh      # One-command service installation
 |
 +-- workspace/                  # Runtime working directory (auto-created)
     |-- uploads/                # Files received from Telegram
@@ -238,7 +240,7 @@ AgentSutra/
 
 ### `bot/telegram_bot.py` - Bot Setup
 - Creates `ApplicationBuilder` with bot token from config
-- Registers 16 command handlers: `/start`, `/status`, `/history`, `/usage`, `/cost`, `/health`, `/exec`, `/context`, `/cancel`, `/projects`, `/schedule`, `/chain`, `/debug`, `/deploy`, `/servers`, `/stopserver`
+- Registers 18 command handlers: `/start`, `/status`, `/history`, `/usage`, `/cost`, `/health`, `/exec`, `/context`, `/cancel`, `/retry`, `/projects`, `/schedule`, `/chain`, `/debug`, `/deploy`, `/servers`, `/stopserver`, `/setup`
 - Registers file handlers (Document, Photo) before text handler to ensure proper routing
 - Text handler is catch-all for non-command messages via `filters.TEXT & ~filters.COMMAND`
 
@@ -645,7 +647,7 @@ Default model: claude-sonnet-4-6
 Workspace: /Users/you/Desktop/AgentSutra/workspace
 Database initialized at /Users/you/Desktop/AgentSutra/storage/agentsutra.db
 Projects registered: 8
-Telegram bot configured with 16 command handlers
+Telegram bot configured with 18 command handlers
 Scheduler started (0 persisted jobs loaded)
 Starting Telegram bot (polling mode)...
 Send /start to your bot to begin
@@ -1098,11 +1100,11 @@ Generates a polished Telegram-ready summary via Claude:
 | Command | Description | Example |
 |---------|-------------|---------|
 | `/start` | Welcome message with capabilities list and all available commands | `/start` |
-| `/status` | Shows all active tasks with current pipeline stage (v2: multiple concurrent tasks) | `/status` --> "Task a1b2c3d4: Creating execution plan..." |
+| `/status` | Shows active tasks; `/status <id>` shows partial pipeline state: plan, audit, timings (v8.6) | `/status` or `/status a1b2` |
 | `/history` | Last 5 tasks with status indicators (done/err/stop/...) | `/history` |
 | `/usage` | Session API token usage: total calls, input tokens, output tokens | `/usage` --> "Total calls: 12, Input tokens: 45,230..." |
-| `/cost` | Estimated API costs: total and per-model breakdown with USD amounts | `/cost` --> "Estimated cost: $0.1234" |
-| `/health` | System health: RAM %, disk free, Ollama status, active tasks, API stats | `/health` --> "RAM: 4.2/16.0 GB (26%)..." |
+| `/cost` | 7-day daily breakdown by day and model, budget remaining, lifetime totals (v8.6) | `/cost` |
+| `/health` | System health: RAM %, disk free, Ollama, active tasks, pipeline perf stats (v8.6) | `/health` |
 | `/exec` | Execute a shell command directly via sandbox safety checks | `/exec ls -la ~/Desktop` |
 | `/context` | View or clear conversation memory and recent history | `/context` or `/context clear` |
 | `/cancel` | Cancel all running tasks (v2: cancels multiple), updates DB status | `/cancel` --> "Cancelled 2 task(s)." |
@@ -1113,6 +1115,8 @@ Generates a polished Telegram-ready summary via Claude:
 | `/deploy` | Manually deploy a task's frontend artifacts to configured provider (v8.1) | `/deploy a1b2c3d4` |
 | `/servers` | List running local preview servers with port, PID, uptime (v8.2) | `/servers` |
 | `/stopserver` | Stop a local server by task ID or stop all (v8.2) | `/stopserver a1b2c3d4` or `/stopserver all` |
+| `/retry` | Re-run failed/crashed tasks with same input (v8.6) | `/retry` or `/retry a1b2c3d4` |
+| `/setup` | Validate system config: env vars, Ollama, projects, DB, budget (v8.6) | `/setup` |
 
 ### /schedule Subcommands
 
@@ -1650,12 +1654,102 @@ AgentSutra was independently stress-tested using a 4-category evaluation protoco
 |----------|--------|-------|
 | Orchestration | 9.5/10 | Complex scientific math + multi-source data retrieval |
 | Safety | 9.0/10 | Refusal logic robust; adversarial audit (Opus) caught high-risk patterns |
-| Code Maturity | 9.2/10 | 561+ tests + comprehensive documentation = production-ready |
+| Code Maturity | 9.2/10 | 661 tests + comprehensive documentation = production-ready |
 | Innovation | 8.5/10 | Adversarial Audit + God Mode focus is a distinct, valuable niche |
 
 ---
 
 ## Changelog
+
+### v8.6.0 — 2026-03-08 — Quality of Life & Partial Result Preservation
+
+Major improvements to developer experience, cost visibility, failure recovery, and operational reliability.
+
+**New commands (2):**
+- `/retry [task_id]` — re-run failed/crashed tasks with the same input. Defaults to most recent failure.
+- `/setup` — validate system configuration: env vars, Ollama, projects, DB, budget, workspace.
+
+**Enhanced commands:**
+- `/cost` — 7-day daily breakdown by day and model, budget remaining, lifetime totals.
+- `/status <task_id>` — show partial pipeline state: plan, audit verdict, feedback, stage timings.
+- `/health` — pipeline performance stats: average stage durations from recent tasks.
+
+**Partial result preservation:**
+- Pipeline state persisted after each node (task_state + last_completed_stage columns in tasks table).
+- Failed tasks retain plan, code, audit result, and stage timings for diagnosis via `/status`.
+- DB migration auto-adds new columns on startup.
+
+**Developer experience:**
+- `Justfile` with test, test-quick, test-security, lint, format, run commands.
+- `.pre-commit-config.yaml` — ruff lint/format, large file check, private key detection.
+- `.github/workflows/ci.yml` — GitHub Actions CI: lint + test on push/PR to main.
+- Enhanced `.claude/commands/` — session log entries, security test runs, issue tracking.
+- Session log moved to separate `SESSION_LOG.md` (keeps CLAUDE.md lean).
+
+**Pipeline improvements:**
+- Temporal window expanded from 30min to 2hr for follow-up pattern detection (~40% more patterns).
+- Budget warning shown when >80% daily budget consumed.
+
+**Operations:**
+- `scripts/com.agentsutra.bot.plist` — launchd service for auto-start/restart on Mac Mini.
+- `scripts/install_service.sh` — one-command service installation.
+
+**Test suite:** 625 passed, 36 skipped (Docker).
+
+---
+
+### v8.5.2 — 2026-03-07 — Third-Pass Security Hardening (37 Fixes)
+
+Comprehensive security hardening from a full third-pass codebase audit. 37 findings across 6 root causes, all remediated. 2 critical, 7 high, 16 medium, 12 low severity.
+
+**Root cause 1 — Code scanner gaps (A-2 through A-6):**
+- Block config module imports (credential exposure via runtime module access)
+- Block os.popen (shell access not covered by existing os block)
+- Block dynamic code functions (bypasses all static scanning)
+- Block all subprocess method calls
+- Block getattr on os, base64 decode, ctypes, chr-chain obfuscation
+
+**Root cause 2 — start_server bypass (A-1, A-10, A-11):**
+- Server commands now run through Tier 1 blocklist before launch
+- Server subprocess env stripped of credentials
+- Auto-installed pip packages use --only-binary :all: (no arbitrary code via setup.py)
+- Visual check URL restricted to localhost only (SSRF prevention)
+
+**Root cause 3 — LLM output trust (A-7, A-8, A-18, A-19, A-29):**
+- shlex.quote on all paths in bootstrap pip commands
+- Working directory validated under WORKSPACE_DIR (path traversal prevention)
+- Executor prompt no longer exposes raw command templates or parameter names
+- _strip_markdown_blocks returns first block (not longest) to prevent gaming
+- Code gen system prompt restricts to current working directory only
+
+**Root cause 4 — Audit prompt injection (A-9, A-20, A-21):**
+- Removed startswith("pass") fallback (trivially injectable)
+- Audit content wrapped in XML tags for structural separation
+- Audit context tail-truncated to 5000 chars (prevents prompt flooding)
+
+**Root cause 5 — Handler boundary validation (A-14 through A-17, A-25, A-30 through A-32):**
+- Task ID prefixes validated as hex format
+- Resource check called at chain start (not just single tasks)
+- Pending file uploads capped at 10 per user
+- JSON file size capped at 10MB before parsing
+- Debug output uses plain text (no Markdown parse_mode injection)
+- Guard for missing update.message in auth decorator
+- Monotonic clock for rate limiting replaces event loop time
+
+**Root cause 6 — Resource housekeeping (A-22 through A-37):**
+- Unknown model costs default to Opus rates (highest tier) with warning log
+- Symlinks skipped during project file enumeration
+- Crash-safe env parsing with safe_int/safe_float helpers in config
+- Word-boundary regex for classifier fallback and short triggers
+- Early-exit counter on file injection rglob (prevents runaway enumeration)
+- Conversation history FIFO cap at 500 rows per user
+- Midnight-based budget cutoffs (replaces rolling 24h windows)
+- Scheduler job removal requires 8+ char prefix
+- SIGTERM handler with WAL checkpoint for clean shutdown
+
+**Test suite:** 625 passed, 36 skipped (Docker). 23 test files updated.
+
+---
 
 ### v8.4.1 — 2026-03-07 — Test Suite Hardening
 

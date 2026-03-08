@@ -19,6 +19,8 @@ from bot.handlers import (
     cmd_deploy,
     cmd_stopserver,
     cmd_servers,
+    cmd_retry,
+    cmd_setup,
     handle_message,
     handle_document,
     handle_photo,
@@ -51,6 +53,8 @@ def create_bot():
     app.add_handler(CommandHandler("deploy", cmd_deploy))
     app.add_handler(CommandHandler("stopserver", cmd_stopserver))
     app.add_handler(CommandHandler("servers", cmd_servers))
+    app.add_handler(CommandHandler("retry", cmd_retry))
+    app.add_handler(CommandHandler("setup", cmd_setup))
 
     # File handlers (must be before text handler)
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
@@ -59,5 +63,5 @@ def create_bot():
     # Text message handler (catch-all for non-commands)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    logger.info("Telegram bot configured with %d command handlers", 16)
+    logger.info("Telegram bot configured with %d command handlers", 18)
     return app

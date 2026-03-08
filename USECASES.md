@@ -1,6 +1,6 @@
 # AgentSutra — Capabilities & Usage Guide
 
-> **Version:** 8.4.1 | **Last updated:** March 2026
+> **Version:** 8.6.0 | **Last updated:** March 2026
 
 A fully autonomous AI agent controlled via Telegram, running on Mac Mini M2. Claude Sonnet generates, Claude Opus audits. Full shell access, internet, local AI, big data, frontend generation, static deployment, visual verification — all from your phone. Hardened with defense-in-depth security.
 
@@ -11,7 +11,7 @@ A fully autonomous AI agent controlled via Telegram, running on Mac Mini M2. Cla
 1. [What It Can Do](#what-it-can-do)
 2. [7 Task Types](#7-task-types)
 3. [Full Capabilities Matrix](#full-capabilities-matrix)
-4. [16 Telegram Commands](#16-telegram-commands)
+4. [18 Telegram Commands](#18-telegram-commands)
 5. [How to Use It Effectively](#how-to-use-it-effectively)
 6. [Portfolio Project Automations](#portfolio-project-automations)
 7. [General-Purpose Use Cases](#general-purpose-use-cases)
@@ -207,19 +207,20 @@ Build a Spotify-style music player UI with playlist management
 
 ---
 
-## 16 Telegram Commands
+## 18 Telegram Commands
 
 | Command | What It Does |
 |---------|-------------|
 | `/start` | Welcome message with capabilities overview |
-| `/status` | Current pipeline stage of active tasks |
+| `/status` | Current pipeline stage of active tasks; `/status <id>` shows partial state |
 | `/history` | Recent tasks with status, duration, errors |
 | `/usage` | Lifetime API token counts |
-| `/cost` | API spend: today, this month, all-time, per-model |
-| `/health` | System status: RAM, disk, Docker, Ollama, active tasks |
+| `/cost` | 7-day daily breakdown by day and model, budget remaining |
+| `/health` | System status: RAM, disk, Docker, Ollama, pipeline perf stats |
 | `/exec <cmd>` | Run a shell command directly (through safety layer) |
 | `/context` | View or clear conversation memory |
 | `/cancel` | Cancel running tasks |
+| `/retry` | Re-run failed/crashed tasks with same input (v8.6) |
 | `/projects` | List registered projects with triggers and commands |
 | `/schedule` | Schedule recurring tasks, list, or remove (`/schedule list`, `/schedule remove <id>`) |
 | `/chain` | Execute strict-AND task chain (`step 1 -> step 2 -> ...`) |
@@ -227,6 +228,7 @@ Build a Spotify-style music player UI with playlist management
 | `/deploy <id>` | Manually deploy a task's frontend artifacts |
 | `/servers` | List running local preview servers |
 | `/stopserver` | Stop a server by task ID or stop all |
+| `/setup` | Validate system config: env vars, Ollama, projects, DB, budget (v8.6) |
 
 ---
 
@@ -629,7 +631,7 @@ The job survives bot restarts via APScheduler SQLite persistence.
       |
  [Telegram Bot API]
       |
- [AgentSutra v8.4.1 on Mac Mini M2]
+ [AgentSutra v8.6.0 on Mac Mini M2]
       |
  classify ──> plan ──> execute ──> audit ──> deliver
  (Sonnet)    (Sonnet)  (Sonnet)   (Opus)    (Sonnet)

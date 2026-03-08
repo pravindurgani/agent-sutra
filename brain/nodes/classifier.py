@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import logging
 
 from brain.state import AgentState
@@ -62,12 +63,21 @@ def classify(state: AgentState) -> dict:
         max_tokens=200,
     )
 
+    # C-9: Strip markdown code fences that Claude sometimes adds
+    cleaned = response.strip()
+    if cleaned.startswith("```"):
+        lines = cleaned.split("\n")
+        cleaned = "\n".join(lines[1:])  # Remove opening fence
+        if cleaned.rstrip().endswith("```"):
+            cleaned = cleaned.rstrip()[:-3]  # Remove closing fence
     try:
-        parsed = json.loads(response)
+        parsed = json.loads(cleaned)
         task_type = parsed.get("task_type", "code")
     except json.JSONDecodeError:
+        # A-27: Use word-boundary matching to prevent false positives
+        resp_lower = response.lower()
         for t in _FALLBACK_ORDER:
-            if t in response.lower():
+            if re.search(rf'\b{t}\b', resp_lower):
                 task_type = t
                 break
         else:

@@ -72,16 +72,13 @@ class TestPhase1_CodeScannerEvasionDeep:
             'exec("os." + "sys" + "tem(\'rm -rf ~/important\')")'
         )
         result = self._run_check(code)
-        # EXPECTED: None (bypass) — scanner sees exec("os." + "sys" + "tem...")
-        # which does not match r"\bos\.system\s*\("
-        assert result is None, (
-            "Payload A (exec assembly) unexpectedly caught — "
-            f"scanner returned: {result}"
+        # A-4: exec() is now caught by code scanner (v8.5.2)
+        assert result is not None, (
+            "A-4: exec() must be caught by code scanner"
         )
 
     def test_payload_a_exec_full_obfuscation(self):
-        """exec() with fully obfuscated string via chr()."""
-        # Constructs: os.system('echo vulnerable')
+        """exec() with fully obfuscated string via chr() -- NOW CAUGHT (A-4)."""
         code = (
             'exec(chr(105)+chr(109)+chr(112)+chr(111)+chr(114)+chr(116)'
             '+chr(32)+chr(111)+chr(115)+chr(10)'
@@ -92,8 +89,8 @@ class TestPhase1_CodeScannerEvasionDeep:
             '+chr(108)+chr(101)+chr(39)+chr(41))'
         )
         result = self._run_check(code)
-        assert result is None, (
-            "Payload A variant (chr obfuscation) unexpectedly caught"
+        assert result is not None, (
+            "A-4: exec() must be caught by code scanner"
         )
 
     # ── Payload B: importlib indirection ──────────────────────────────
@@ -134,31 +131,26 @@ class TestPhase1_CodeScannerEvasionDeep:
 
     # ── Pattern analysis: what would close these gaps ─────────────────
 
-    def test_document_pattern_gaps(self):
-        """Document remaining pattern gaps after S-2 fix (v8.5.0).
-        importlib and dunder-import are now covered. chr-obfuscation and getattr remain open."""
+    def test_document_pattern_coverage(self):
+        """All major evasion patterns now covered after A-4/A-5/A-6 (v8.5.2)."""
         from tools.sandbox import _CODE_BLOCKED_PATTERNS
 
         patterns = [(p.pattern, label) for p, label in _CODE_BLOCKED_PATTERNS]
 
-        # Remaining gap: chr() string obfuscation
+        # All gaps from v8.5.0 are now closed
         has_chr_obfuscation_pattern = any("chr" in p for p, _ in patterns)
-        # Fixed (S-2): importlib.import_module now caught
         has_importlib_pattern = any("importlib" in p for p, _ in patterns)
-        # Fixed (S-2): dunder-import now caught
         has_dunder_import_pattern = any("__import__" in p for p, _ in patterns)
-        # Remaining gap: getattr(..., ...) with obfuscated names
         has_getattr_pattern = any("getattr" in p for p, _ in patterns)
+        has_exec_pattern = any("exec" in p for p, _ in patterns)
+        has_subprocess_pattern = any("subprocess" in p for p, _ in patterns)
 
-        # S-2 fix closed importlib and dunder-import gaps
         assert has_importlib_pattern, "importlib pattern must exist (S-2 fix)"
         assert has_dunder_import_pattern, "dunder-import pattern must exist (S-2 fix)"
-
-        # 2 remaining gaps: chr obfuscation and getattr indirection
-        remaining_gaps = sum(1 for v in [has_chr_obfuscation_pattern, has_getattr_pattern] if not v)
-        assert remaining_gaps >= 1, (
-            "Expected at least 1 remaining gap (chr obfuscation or getattr)"
-        )
+        assert has_chr_obfuscation_pattern, "chr() chain pattern must exist (A-6 fix)"
+        assert has_getattr_pattern, "getattr(os,...) pattern must exist (A-6 fix)"
+        assert has_exec_pattern, "exec() pattern must exist (A-4 fix)"
+        assert has_subprocess_pattern, "subprocess pattern must exist (A-5 fix)"
 
 
 class TestPhase1_ShellBlocklistDeepVectors:

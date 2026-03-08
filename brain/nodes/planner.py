@@ -214,7 +214,7 @@ def plan(state: AgentState) -> dict:
         memories = sync_query_project_memories(state["project_name"], limit=5)
         if memories:
             lessons = "\n".join(
-                f"- [{mtype}] {content}" for mtype, content in memories
+                f"- [MEMORY]: [{mtype}] {content}" for mtype, content in memories
             )
             system += (
                 f"\n\nLESSONS LEARNED FROM PREVIOUS RUNS OF {state['project_name'].upper()}:\n"
@@ -300,8 +300,16 @@ def _inject_project_files(state: AgentState, system: str) -> str:
     # Collect source files, respecting exclusion list
     source_files: list[str] = []
     try:
+        _enum_count = 0
         for p in project_path.rglob("*"):
+            # A-28: Early exit to avoid traversing 100K+ files
+            _enum_count += 1
+            if _enum_count > config.MAX_FILE_INJECT_COUNT * 2:
+                break
             if any(excluded in p.parts for excluded in _INJECT_EXCLUDE_DIRS):
+                continue
+            # A-23: Skip symlinks — they could point outside project dir
+            if p.is_symlink():
                 continue
             if p.is_file() and p.suffix in _INJECT_EXTENSIONS:
                 source_files.append(str(p.relative_to(project_path)))
@@ -351,7 +359,9 @@ def _inject_project_files(state: AgentState, system: str) -> str:
         full = (project_path / rel_path).resolve()
         if not full.is_file():
             continue
-        if not str(full).startswith(str(resolved_root) + "/"):
+        try:
+            full.relative_to(resolved_root)
+        except ValueError:
             logger.warning("Path traversal blocked: %s escapes %s", rel_path, resolved_root)
             continue
         try:

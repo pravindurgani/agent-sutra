@@ -55,8 +55,10 @@ def list_jobs() -> list[dict]:
 
 
 def remove_job(job_id: str):
-    """Remove a scheduled job by ID. Accepts partial ID (prefix match)."""
-    # Support partial ID matching (user sees first 8 chars)
+    """Remove a scheduled job by ID. Accepts partial ID (prefix match, min 8 chars)."""
+    # A-35: Require minimum 8-char prefix to prevent accidental matches
+    if len(job_id) < 8:
+        raise ValueError(f"Job ID prefix must be at least 8 characters (got {len(job_id)})")
     for job in scheduler.get_jobs():
         if job.id.startswith(job_id):
             scheduler.remove_job(job.id)

@@ -11,6 +11,7 @@ from brain.nodes.planner import plan
 from brain.nodes.executor import execute
 from brain.nodes.auditor import audit
 from brain.nodes.deliverer import deliver
+from storage.db import sync_update_task_state
 import config
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,9 @@ _stage_lock = threading.Lock()
 def set_stage(task_id: str, stage: str):
     """Update the current stage for a task (thread-safe)."""
     with _stage_lock:
+        # D-2: Prevent unbounded growth — prune if over 100 entries
+        if len(_task_stages) > 100:
+            _task_stages.clear()
         _task_stages[task_id] = stage
 
 
@@ -39,7 +43,7 @@ def clear_stage(task_id: str):
 
 
 def _wrap_node(name: str, func):
-    """Wrap a node function to update stage tracking and record timing."""
+    """Wrap a node function to update stage tracking, record timing, and persist state."""
     def wrapper(state: AgentState) -> dict:
         set_stage(state["task_id"], name)
         t0 = _time.time()
@@ -48,6 +52,9 @@ def _wrap_node(name: str, func):
         timings = list(state.get("stage_timings", []))
         timings.append({"name": name, "duration_ms": elapsed_ms})
         result["stage_timings"] = timings
+        # Persist partial state after each node (graceful — never crashes pipeline)
+        merged = {**state, **result}
+        sync_update_task_state(state["task_id"], merged, name)
         return result
     return wrapper
 

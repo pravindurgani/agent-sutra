@@ -50,28 +50,25 @@ class TestCodeScannerEvasion:
 
     # ── exec() evasion ────────────────────────────────────────────────
 
-    def test_exec_os_system_BYPASSES(self):
-        """exec() dynamically constructing os.system call — EXPECTED BYPASS."""
-        code = 'import os\nexec("os." + "system" + "(\'echo pwned\')")'
+    def test_exec_os_system_NOW_CAUGHT(self):
+        """A-4: exec() now caught by code scanner."""
+        code = "import os\nexec(\"os.\" + \"system\" + \"('echo pwned')\")"
         result = self._run_check(code)
-        # This WILL be None — the regex scanner can't see through exec()
-        # Documenting as a known limitation
-        assert result is None, "Scanner now catches exec-based evasion (unexpected improvement)"
+        assert result is not None, "A-4: exec() must be caught"
 
-    def test_exec_with_chr_obfuscation_BYPASSES(self):
-        """exec() with chr() to hide string literals — EXPECTED BYPASS."""
-        # Constructs: os.system("echo pwned")
-        code = 'exec(chr(111)+chr(115)+chr(46)+chr(115)+chr(121)+chr(115)+chr(116)+chr(101)+chr(109)+"(\\"echo pwned\\")")'
+    def test_exec_with_chr_obfuscation_NOW_CAUGHT(self):
+        """A-4: exec() with chr() now caught."""
+        code = "exec(chr(111)+chr(115)+chr(46)+chr(115)+chr(121)+chr(115)+chr(116)+chr(101)+chr(109)+\"(\\\"echo pwned\\\")\")"
         result = self._run_check(code)
-        assert result is None, "Scanner now catches chr-obfuscated exec (unexpected)"
+        assert result is not None, "A-4: exec() must be caught"
 
     # ── getattr() evasion ─────────────────────────────────────────────
 
-    def test_getattr_os_system_BYPASSES(self):
-        """getattr(os, 'system') — EXPECTED BYPASS."""
-        code = 'import os\nfn = getattr(os, "sys" + "tem")\nfn("echo pwned")'
+    def test_getattr_os_system_NOW_CAUGHT(self):
+        """A-6: getattr(os, ...) now caught by code scanner."""
+        code = "import os\nfn = getattr(os, \"sys\" + \"tem\")\nfn(\"echo pwned\")"
         result = self._run_check(code)
-        assert result is None, "Scanner catches getattr evasion (unexpected)"
+        assert result is not None, "A-6: getattr(os, ...) must be caught"
 
     # ── importlib evasion ─────────────────────────────────────────────
 
@@ -125,17 +122,17 @@ class TestCodeScannerEvasion:
         # Scanner catches '"id_rsa"' as a string literal — correct
         assert result is not None
 
-    def test_subprocess_run_fully_computed_BYPASSES(self):
-        """subprocess.run with fully computed path — no string literals to match."""
+    def test_subprocess_run_fully_computed_NOW_CAUGHT(self):
+        """A-5: subprocess.run now caught even with computed paths."""
         code = (
             'import subprocess, os\n'
             'parts = [os.path.expanduser("~")]\n'
-            'parts.append(chr(46) + chr(115) + chr(115) + chr(104))\n'  # .ssh
-            'parts.append(chr(105) + chr(100) + chr(95) + chr(114) + chr(115) + chr(97))\n'  # id_rsa
+            'parts.append(chr(46) + chr(115) + chr(115) + chr(104))\n'
+            'parts.append(chr(105) + chr(100) + chr(95) + chr(114) + chr(115) + chr(97))\n'
             'subprocess.run(["cat", os.path.join(*parts)])'
         )
         result = self._run_check(code)
-        assert result is None, "Scanner catches fully computed path (unexpected)"
+        assert result is not None, "A-5: subprocess.run must be caught"
 
     # ── pathlib-based credential read ─────────────────────────────────
 

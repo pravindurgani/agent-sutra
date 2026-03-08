@@ -24,7 +24,9 @@ CREATE TABLE IF NOT EXISTS tasks (
     error TEXT DEFAULT '',
     token_usage TEXT DEFAULT '{}',
     created_at TEXT NOT NULL,
-    completed_at TEXT DEFAULT ''
+    completed_at TEXT DEFAULT '',
+    task_state TEXT DEFAULT '{}',
+    last_completed_stage TEXT DEFAULT ''
 )
 """
 
@@ -75,6 +77,15 @@ async def init_db():
         await db.execute("CREATE INDEX IF NOT EXISTS idx_context_user ON conversation_context(user_id)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_history_user ON conversation_history(user_id)")
+        # Migration: add task_state and last_completed_stage columns (v8.5.2+)
+        cursor = await db.execute("PRAGMA table_info(tasks)")
+        columns = {row[1] for row in await cursor.fetchall()}
+        if "task_state" not in columns:
+            await db.execute("ALTER TABLE tasks ADD COLUMN task_state TEXT DEFAULT '{}'")
+            logger.info("Migration: added task_state column to tasks")
+        if "last_completed_stage" not in columns:
+            await db.execute("ALTER TABLE tasks ADD COLUMN last_completed_stage TEXT DEFAULT ''")
+            logger.info("Migration: added last_completed_stage column to tasks")
         await db.commit()
     logger.info("Database initialized at %s (WAL mode)", config.DB_PATH)
 
@@ -93,8 +104,8 @@ async def create_task(task_id: str, user_id: int, message: str) -> dict:
 
 
 async def update_task(task_id: str, **fields):
-    """Update task fields. Valid fields: task_type, status, plan, result, error, token_usage, completed_at."""
-    valid = {"task_type", "status", "plan", "result", "error", "token_usage", "completed_at"}
+    """Update task fields. Valid fields: task_type, status, plan, result, error, token_usage, completed_at, task_state, last_completed_stage."""
+    valid = {"task_type", "status", "plan", "result", "error", "token_usage", "completed_at", "task_state", "last_completed_stage"}
     updates = {k: v for k, v in fields.items() if k in valid}
     if not updates:
         return
@@ -116,6 +127,18 @@ async def get_task(task_id: str) -> dict | None:
     async with aiosqlite.connect(config.DB_PATH, timeout=20.0) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+
+async def get_task_by_prefix(prefix: str) -> dict | None:
+    """Fetch a task by ID prefix match."""
+    async with aiosqlite.connect(config.DB_PATH, timeout=20.0) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM tasks WHERE id LIKE ? ORDER BY created_at DESC LIMIT 1",
+            (prefix + "%",),
+        ) as cursor:
             row = await cursor.fetchone()
             return dict(row) if row else None
 
@@ -200,6 +223,12 @@ async def add_history(user_id: int, role: str, content: str, task_id: str | None
             "VALUES (?, ?, ?, ?, ?)",
             (user_id, role, content[:5000], task_id, now),
         )
+        # A-33: FIFO cap — keep at most 500 rows per user
+        await db.execute(
+            "DELETE FROM conversation_history WHERE user_id = ? AND id NOT IN "
+            "(SELECT id FROM conversation_history WHERE user_id = ? ORDER BY id DESC LIMIT 500)",
+            (user_id, user_id),
+        )
         await db.commit()
 
 
@@ -234,12 +263,53 @@ async def build_conversation_context(user_id: int, limit: int = 6) -> str:
     return "\n".join(lines)
 
 
-# ── Project memory (synchronous — used by pipeline nodes in asyncio.to_thread) ─
+# ── Synchronous DB operations (used by pipeline nodes in asyncio.to_thread) ──
 
-# Pipeline nodes (deliverer, planner) run synchronously via asyncio.to_thread().
+# Pipeline nodes (deliverer, planner, graph) run synchronously via asyncio.to_thread().
 # They CANNOT use aiosqlite. This follows the same pattern as
 # claude_client._persist_usage() which uses synchronous sqlite3.
 _sync_db_lock = threading.Lock()
+
+# Fields to persist from AgentState after each stage (excludes large blobs)
+_PERSIST_STATE_FIELDS = (
+    "task_type", "project_name", "plan", "code", "execution_result",
+    "audit_verdict", "audit_feedback", "stage_timings", "extracted_params",
+    "deploy_url", "server_url", "retry_count",
+)
+_MAX_STATE_FIELD_LEN = 5000
+
+
+def sync_update_task_state(task_id: str, state: dict, stage_name: str) -> None:
+    """Persist partial pipeline state after each node completes.
+
+    Args:
+        task_id: Task UUID.
+        state: Current AgentState dict.
+        stage_name: Name of the stage that just completed.
+    """
+    try:
+        snapshot = {}
+        for key in _PERSIST_STATE_FIELDS:
+            val = state.get(key)
+            if val is None:
+                continue
+            if isinstance(val, str) and len(val) > _MAX_STATE_FIELD_LEN:
+                val = val[:_MAX_STATE_FIELD_LEN] + "... (truncated)"
+            snapshot[key] = val
+        state_json = json.dumps(snapshot, default=str)
+
+        with _sync_db_lock:
+            conn = sqlite3.connect(str(config.DB_PATH), timeout=20.0)
+            try:
+                conn.execute(
+                    "UPDATE tasks SET task_state = ?, last_completed_stage = ? WHERE id = ?",
+                    (state_json, stage_name, task_id),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+    except Exception as e:
+        logger.warning("Failed to persist task state for %s: %s", task_id, e)
 
 
 def sync_write_project_memory(
@@ -249,6 +319,7 @@ def sync_write_project_memory(
     with _sync_db_lock:
         conn = sqlite3.connect(str(config.DB_PATH), timeout=20.0)
         try:
+            conn.execute("PRAGMA journal_mode=WAL")
             conn.execute(
                 "INSERT OR IGNORE INTO project_memory "
                 "(project_name, memory_type, content, created_at, task_id) "
@@ -277,6 +348,7 @@ def sync_query_project_memories(
     with _sync_db_lock:
         conn = sqlite3.connect(str(config.DB_PATH), timeout=20.0)
         try:
+            conn.execute("PRAGMA journal_mode=WAL")
             cursor = conn.execute(
                 "SELECT memory_type, content FROM project_memory "
                 "WHERE project_name = ? "

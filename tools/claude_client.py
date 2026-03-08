@@ -95,12 +95,16 @@ def _check_budget():
     try:
         conn = sqlite3.connect(str(_usage_db_path), timeout=10.0)
         try:
-            now = time.time()
+            # A-34: Use midnight-based cutoffs (consistent with _get_today_spend)
+            from datetime import datetime, timezone
+            now_dt = datetime.now(timezone.utc)
+            midnight_today = now_dt.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+            midnight_month = now_dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0).timestamp()
             checks = []
             if daily_limit:
-                checks.append(("daily", now - 86400, daily_limit))
+                checks.append(("daily", midnight_today, daily_limit))
             if monthly_limit:
-                checks.append(("monthly", now - 86400 * 30, monthly_limit))
+                checks.append(("monthly", midnight_month, monthly_limit))
 
             for label, cutoff_ts, limit in checks:
                 rows = conn.execute(
@@ -111,7 +115,8 @@ def _check_budget():
                 total_cost = 0.0
                 for model_name, inp, out, think in rows:
                     think = think or 0
-                    costs = MODEL_COSTS.get(model_name, {"input": 3.00, "output": 15.00})
+                    # A-22/A-34: Default to highest-tier pricing on unknown model
+                    costs = MODEL_COSTS.get(model_name, {"input": 15.00, "output": 75.00})
                     total_cost += (inp * costs["input"] + (out + think) * costs["output"]) / 1_000_000
                 if total_cost >= limit:
                     raise BudgetExceededError(
@@ -311,7 +316,7 @@ def get_cost_summary() -> dict:
             ).fetchall()
             for model, calls, inp, out, think in rows:
                 think = think or 0
-                costs = MODEL_COSTS.get(model, {"input": 3.00, "output": 15.00})
+                costs = MODEL_COSTS.get(model, {"input": 15.00, "output": 75.00})
                 cost_usd = (inp * costs["input"] + (out + think) * costs["output"]) / 1_000_000
                 result["total_calls"] += calls
                 result["total_input_tokens"] += inp
@@ -329,4 +334,92 @@ def get_cost_summary() -> dict:
             conn.close()
     except Exception as e:
         logger.warning("Failed to read cost summary: %s", e)
+    return result
+
+
+def get_daily_cost_breakdown(days: int = 7) -> list[dict]:
+    """Return per-day cost breakdown for the last N days.
+
+    Returns:
+        List of dicts with keys: date, calls, cost_usd, by_model.
+    """
+    _init_usage_db()
+    from datetime import datetime, timezone, timedelta
+    result = []
+    try:
+        now = datetime.now(timezone.utc)
+        cutoff = (now - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+        conn = sqlite3.connect(str(_usage_db_path), timeout=20.0)
+        try:
+            rows = conn.execute(
+                "SELECT date(timestamp, 'unixepoch') as day, model, COUNT(*), "
+                "SUM(input_tokens), SUM(output_tokens), SUM(thinking_tokens) "
+                "FROM api_usage WHERE timestamp > ? GROUP BY day, model ORDER BY day DESC",
+                (cutoff,),
+            ).fetchall()
+        finally:
+            conn.close()
+
+        # Group by day
+        days_map: dict[str, dict] = {}
+        for day, model, calls, inp, out, think in rows:
+            think = think or 0
+            costs = MODEL_COSTS.get(model, {"input": 15.00, "output": 75.00})
+            cost_usd = (inp * costs["input"] + (out + think) * costs["output"]) / 1_000_000
+            if day not in days_map:
+                days_map[day] = {"date": day, "calls": 0, "cost_usd": 0.0, "by_model": {}}
+            days_map[day]["calls"] += calls
+            days_map[day]["cost_usd"] += cost_usd
+            short = model.split("-")[-1] if "-" in model else model
+            days_map[day]["by_model"][short] = days_map[day]["by_model"].get(short, 0.0) + cost_usd
+
+        result = sorted(days_map.values(), key=lambda d: d["date"], reverse=True)
+    except Exception as e:
+        logger.warning("Failed to read daily cost breakdown: %s", e)
+    return result
+
+
+def get_budget_remaining() -> dict:
+    """Return remaining budget for daily and monthly limits.
+
+    Returns:
+        Dict with keys: daily_limit, daily_spent, daily_remaining,
+        monthly_limit, monthly_spent, monthly_remaining. Values are None if no limit set.
+    """
+    _init_usage_db()
+    from datetime import datetime, timezone
+    result: dict = {
+        "daily_limit": config.DAILY_BUDGET_USD or None,
+        "daily_spent": None,
+        "daily_remaining": None,
+        "monthly_limit": config.MONTHLY_BUDGET_USD or None,
+        "monthly_spent": None,
+        "monthly_remaining": None,
+    }
+    try:
+        now_dt = datetime.now(timezone.utc)
+        conn = sqlite3.connect(str(_usage_db_path), timeout=10.0)
+        try:
+            for period, cutoff_ts, limit_key in [
+                ("daily", now_dt.replace(hour=0, minute=0, second=0, microsecond=0).timestamp(), "daily_limit"),
+                ("monthly", now_dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0).timestamp(), "monthly_limit"),
+            ]:
+                rows = conn.execute(
+                    "SELECT model, SUM(input_tokens), SUM(output_tokens), SUM(thinking_tokens) "
+                    "FROM api_usage WHERE timestamp > ? GROUP BY model",
+                    (cutoff_ts,),
+                ).fetchall()
+                total = 0.0
+                for model_name, inp, out, think in rows:
+                    think = think or 0
+                    costs = MODEL_COSTS.get(model_name, {"input": 15.00, "output": 75.00})
+                    total += (inp * costs["input"] + (out + think) * costs["output"]) / 1_000_000
+                result[f"{period}_spent"] = total
+                limit = result[limit_key]
+                if limit:
+                    result[f"{period}_remaining"] = max(0.0, limit - total)
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning("Failed to read budget remaining: %s", e)
     return result

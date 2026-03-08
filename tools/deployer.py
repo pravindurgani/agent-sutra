@@ -74,18 +74,24 @@ def _deploy_github_pages(output_dir: Path, project_name: str) -> str:
 
     # Clone or update the deploy repo
     if not (repo_dir / ".git").exists():
+        # S-12: Token in URL is visible in `ps`. Consider GIT_ASKPASS for production.
         repo_url = f"https://x-access-token:{config.DEPLOY_GITHUB_TOKEN}@github.com/{config.DEPLOY_REPO}.git"
         logger.info("Cloning deploy repo to %s", repo_dir)
-        subprocess.run(
+        # A-12: Check returncode on git operations
+        clone_result = subprocess.run(
             ["git", "clone", "--depth", "1", repo_url, str(repo_dir)],
             capture_output=True, text=True, timeout=60, env=env,
         )
+        if clone_result.returncode != 0:
+            raise RuntimeError(f"Git clone failed: {clone_result.stderr[:200]}")
     else:
         logger.info("Pulling latest deploy repo")
-        subprocess.run(
+        pull_result = subprocess.run(
             ["git", "pull", "--ff-only"],
             cwd=repo_dir, capture_output=True, text=True, timeout=30, env=env,
         )
+        if pull_result.returncode != 0:
+            logger.warning("Git pull failed (non-fatal): %s", pull_result.stderr[:200])
 
     # Copy artifacts to project subdirectory
     project_dir = repo_dir / project_name
@@ -106,10 +112,13 @@ def _deploy_github_pages(output_dir: Path, project_name: str) -> str:
     if commit_result.returncode != 0 and "nothing to commit" in (commit_result.stdout + commit_result.stderr):
         logger.info("No changes to deploy for %s", project_name)
 
-    subprocess.run(
+    # A-12: Check push returncode
+    push_result = subprocess.run(
         ["git", "push"],
         cwd=repo_dir, capture_output=True, text=True, timeout=60, env=env,
     )
+    if push_result.returncode != 0:
+        raise RuntimeError(f"Git push failed: {push_result.stderr[:200]}")
 
     url = f"{config.DEPLOY_BASE_URL}/{project_name}/"
     logger.info("Deployed %s to %s", project_name, url)
@@ -127,13 +136,15 @@ def _deploy_vercel(output_dir: Path, project_name: str) -> str:
     if not config.DEPLOY_VERCEL_TOKEN:
         raise ValueError("DEPLOY_VERCEL_TOKEN not configured")
 
+    # A-13: Pass token via env var instead of CLI arg (hidden from ps)
+    vercel_env = _safe_env()
+    vercel_env["VERCEL_TOKEN"] = config.DEPLOY_VERCEL_TOKEN
     result = subprocess.run(
         [
-            "vercel", "--token", config.DEPLOY_VERCEL_TOKEN,
-            "--yes", "--name", project_name, str(output_dir),
+            "vercel", "--yes", "--name", project_name, str(output_dir),
         ],
         capture_output=True, text=True, timeout=120,
-        env=_safe_env(),
+        env=vercel_env,
     )
 
     if result.returncode != 0:
@@ -174,16 +185,18 @@ def _deploy_firebase(output_dir: Path, project_name: str) -> str:
     config_path.write_text(_json.dumps(firebase_config, indent=2))
 
     try:
+        # A-13: Pass token via env var instead of CLI arg (hidden from ps)
+        firebase_env = _safe_env()
+        firebase_env["FIREBASE_TOKEN"] = config.DEPLOY_FIREBASE_TOKEN
         result = subprocess.run(
             [
                 "firebase", "deploy", "--only", "hosting",
                 "--project", config.DEPLOY_FIREBASE_PROJECT,
-                "--token", config.DEPLOY_FIREBASE_TOKEN,
                 "--non-interactive",
             ],
             cwd=output_dir,
             capture_output=True, text=True, timeout=120,
-            env=_safe_env(),
+            env=firebase_env,
         )
 
         if result.returncode != 0:

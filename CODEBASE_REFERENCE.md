@@ -4,7 +4,7 @@ Every folder, file, and configuration in the AgentSutra project — what it is, 
 
 **Generated:** 2026-02-24 (v8.0.0 baseline)
 
-> **Note:** This reference was written at v8.0.0. Versions 8.1.0–8.4.1 added: `tools/deployer.py` (static deployment), `tools/visual_check.py` (Playwright verification), server management in `tools/sandbox.py`, `/deploy`, `/servers`, `/stopserver` commands, `server_url` and `deploy_url` in AgentState, Firebase Hosting support, visual check context in the auditor, Tier 1+ code/script scanning, truncation detection, fabrication detection, and chain strict-AND gate. See [AGENTSUTRA.md changelog](AGENTSUTRA.md#changelog) for full details.
+> **Note:** This reference was written at v8.0.0. Versions 8.1.0–8.6.0 added: `tools/deployer.py` (static deployment), `tools/visual_check.py` (Playwright verification), server management in `tools/sandbox.py`, `/deploy`, `/servers`, `/stopserver` commands, `server_url` and `deploy_url` in AgentState, Firebase Hosting support, visual check context in the auditor, Tier 1+ code/script scanning, truncation detection, fabrication detection, chain strict-AND gate, comprehensive third-pass security hardening (37 fixes), partial result preservation (`task_state`/`last_completed_stage` in DB), cost analytics with 7-day breakdown, `/retry` and `/setup` commands, budget >80% warning, temporal window expansion (30min→2hr), Justfile, pre-commit hooks, GitHub Actions CI, and launchd service. See [AGENTSUTRA.md changelog](AGENTSUTRA.md#changelog) for full details.
 
 ---
 
@@ -34,13 +34,13 @@ Every folder, file, and configuration in the AgentSutra project — what it is, 
 
 AgentSutra is a self-hosted Telegram bot that receives natural language tasks, processes them through a 5-stage LangGraph pipeline (Classify → Plan → Execute → Audit → Deliver), and returns results. It runs on a Mac Mini M2 (16GB) for a single authenticated user.
 
-**Key numbers (v8.4.1):**
-- ~6,300 lines of application code across 20 source files
-- ~8,800 lines of test code across 24 test files
-- 602 automated tests passing (36 skipped — Docker required)
-- 16 Telegram commands
+**Key numbers (v8.6.0):**
+- ~7,050 lines of application code across 20 source files
+- ~9,000 lines of test code across 24 test files
+- 661 total tests (625 passing, 36 skipped — Docker required)
+- 18 Telegram commands
 - 7 task types
-- 39 blocked command patterns (Tier 1 security) + full-text code scanning (Tier 1+)
+- 39 blocked command patterns (Tier 1 security) + full-text code scanning (Tier 1+) + 51 code scanner patterns (Tier 4/5)
 - 5-stage pipeline with cross-model auditing (Sonnet writes, Opus reviews)
 - 3 deployment providers (GitHub Pages, Vercel, Firebase)
 
@@ -48,7 +48,7 @@ AgentSutra is a self-hosted Telegram bot that receives natural language tasks, p
 
 ## Root Directory Files
 
-### `main.py` (142 lines, 4.5 KB)
+### `main.py` (212 lines, ~7 KB)
 **Purpose:** Application entry point and boot sequence.
 
 **What it does:**
@@ -64,7 +64,7 @@ AgentSutra is a self-hosted Telegram bot that receives natural language tasks, p
 
 ---
 
-### `config.py` (95 lines, 3.6 KB)
+### `config.py` (133 lines, ~5 KB)
 **Purpose:** Centralised configuration loaded from `.env` with sensible defaults.
 
 **What it does:**
@@ -72,7 +72,7 @@ AgentSutra is a self-hosted Telegram bot that receives natural language tasks, p
 - Parses environment variables for API keys, model names, timeouts, budget limits, Docker settings
 - Creates required directories on import (`mkdir(parents=True, exist_ok=True)`)
 - Defines `PROTECTED_ENV_KEYS` and `PROTECTED_ENV_SUBSTRINGS` for credential stripping from subprocess environments
-- `VERSION = "8.0.0"` — single source of truth for the version string
+- `VERSION = "8.6.0"` — single source of truth for the version string
 
 **Why this way:** All settings in one module means any file can `import config` and access everything. No scattered `os.getenv()` calls. The `_parse_user_ids()` helper handles malformed comma-separated IDs gracefully.
 
@@ -176,18 +176,18 @@ The bot module handles all user interaction through Telegram. It is the only ext
 ### `bot/__init__.py` (0 lines)
 Package marker. Empty.
 
-### `bot/telegram_bot.py` (57 lines, 1.9 KB)
+### `bot/telegram_bot.py` (67 lines, 2.1 KB)
 **Purpose:** Bot application factory and command registration.
 
 **What it does:**
 - Creates the Telegram bot application using `ApplicationBuilder`
-- Registers all 13 command handlers (`/start`, `/status`, `/history`, `/usage`, `/cost`, `/health`, `/exec`, `/context`, `/cancel`, `/projects`, `/schedule`, `/chain`, `/debug`)
+- Registers all 18 command handlers (`/start`, `/status`, `/history`, `/usage`, `/cost`, `/health`, `/exec`, `/context`, `/cancel`, `/retry`, `/projects`, `/schedule`, `/chain`, `/debug`, `/deploy`, `/servers`, `/stopserver`, `/setup`)
 - Registers file handlers (documents, photos) and the catch-all text message handler
 - Returns the configured application for `main.py` to start
 
 **Why this way:** Separated from `handlers.py` to keep the wiring clean. The factory pattern makes it easy to see all registered handlers at a glance. File handlers are registered before the text handler because Telegram dispatches to the first matching handler.
 
-### `bot/handlers.py` (~942 lines, 35 KB)
+### `bot/handlers.py` (~1381 lines, 50 KB)
 **Purpose:** All Telegram command handlers, message processing, authentication, and resource management.
 
 **What it does:**
@@ -218,10 +218,10 @@ The brain module implements the 5-stage LangGraph pipeline: Classify → Plan �
 ### `brain/__init__.py` (0 lines)
 Package marker.
 
-### `brain/state.py` (52 lines, 1.4 KB)
+### `brain/state.py` (58 lines, 1.6 KB)
 **Purpose:** Defines `AgentState` TypedDict — the single data structure that flows through the entire pipeline.
 
-**Fields (21 total):**
+**Fields (23 total):**
 | Field | Type | Set By |
 |-------|------|--------|
 | `task_id` | `str` | Handler |
@@ -244,11 +244,14 @@ Package marker.
 | `auto_installed_packages` | `list[str]` | Executor |
 | `stage_timings` | `list[dict]` | Graph (v8) |
 | `final_response` | `str` | Deliverer |
+| `stage_timings` | `list[dict]` | Graph (v8) |
+| `server_url` | `str` | Executor (v8.2) |
+| `deploy_url` | `str` | Deliverer (v8.1) |
 | `artifacts` | `list[str]` | Deliverer |
 
 **Why TypedDict:** LangGraph requires a typed state dict. TypedDict gives type checker support without runtime overhead. Each node function returns a partial dict that LangGraph merges into the state.
 
-### `brain/graph.py` (134 lines, 4.1 KB)
+### `brain/graph.py` (143 lines, 4.4 KB)
 **Purpose:** Wires the 5-stage pipeline using LangGraph's StateGraph and provides the `run_task()` entry point.
 
 **What it does:**
@@ -281,7 +284,7 @@ Package marker.
 
 **Why this way:** The two-tier approach (triggers first, then LLM) saves $0.01-0.03 per project task. The `_FALLBACK_ORDER` list is imported by tests to stay in sync. The classifier uses `route_and_call(purpose="classify", complexity="low")` (v8) so low-complexity classification can route to Ollama.
 
-### `brain/nodes/planner.py` (359 lines, 15 KB)
+### `brain/nodes/planner.py` (380 lines, 16 KB)
 **Purpose:** Generates an execution plan based on task type and context.
 
 **What it does:**
@@ -295,7 +298,7 @@ Package marker.
 
 **Why this way:** Task-type-specific prompts outperform a single generic prompt because each type has different audit criteria and output expectations. The memory injection enables cross-task learning: if the same project failed last time because of a missing venv, the planner knows to activate it this time.
 
-### `brain/nodes/executor.py` (604 lines, 23 KB)
+### `brain/nodes/executor.py` (743 lines, 28 KB)
 **Purpose:** Generates code from the plan and executes it in a sandbox.
 
 **What it does:**
@@ -314,7 +317,7 @@ Package marker.
 
 **Why this way:** The executor is the most complex node because it handles two fundamentally different execution modes (project commands vs. generated code). The auto-install loop for projects prevents burning pipeline retries on missing dependencies. The `_estimate_timeout()` function scales timeout based on task type and data size.
 
-### `brain/nodes/auditor.py` (274 lines, 10 KB)
+### `brain/nodes/auditor.py` (305 lines, 12 KB)
 **Purpose:** Cross-model adversarial quality review of execution output.
 
 **What it does:**
@@ -332,7 +335,7 @@ Package marker.
 
 **Why this way:** Using a DIFFERENT model (Opus) than the executor (Sonnet) is the core safety mechanism. The same model approving its own work creates an echo chamber. The balanced-brace JSON extractor handles cases where Claude wraps JSON in explanation text. The environment error short-circuit saves 9 API calls on unrecoverable failures.
 
-### `brain/nodes/deliverer.py` (327 lines, 12 KB)
+### `brain/nodes/deliverer.py` (376 lines, 14 KB)
 **Purpose:** Formats the final response for delivery back to the user via Telegram.
 
 **What it does:**
@@ -342,7 +345,7 @@ Package marker.
 - Calls Claude to generate a polished summary (under 1800 chars for Telegram)
 - Falls back to a template-based response if Claude summary generation fails
 - **Memory extraction (v8):** Stores success/failure patterns to `project_memory` table
-- **Temporal mining (v8):** `_suggest_next_step()` queries task history for follow-up patterns. If the same follow-up has occurred 2+ times within 30 minutes, appends a suggestion.
+- **Temporal mining (v8):** `_suggest_next_step()` queries task history for follow-up patterns. If the same follow-up has occurred 2+ times within 2 hours, appends a suggestion.
 - **Debug sidecar (v8):** `_write_debug_sidecar()` writes a `.debug.json` file with stage timings, verdict, retry count
 
 **Critical rule in system prompt:** "If the status says FAILED, you MUST clearly state the task failed. NEVER fabricate success." — Added in v7 after discovering the deliverer told users "HTML file created successfully" when no file existed.
@@ -356,8 +359,8 @@ Package marker.
 ### `tools/__init__.py` (0 lines)
 Package marker.
 
-### `tools/claude_client.py` (332 lines, 13 KB)
-**Purpose:** Anthropic API wrapper with retry logic, cost tracking, and streaming support.
+### `tools/claude_client.py` (425 lines, 16 KB)
+**Purpose:** Anthropic API wrapper with retry logic, cost tracking, streaming support, daily cost breakdown, and budget remaining.
 
 **What it does:**
 - `call()` — main entry point for all Claude API calls. Handles:
@@ -372,7 +375,7 @@ Package marker.
 
 **Why this way:** Centralising all Claude calls in one module ensures consistent retry handling, budget enforcement, and cost tracking. The streaming mode for thinking calls was added in v7 to fix Anthropic's 10-minute hard timeout on non-streaming requests. The synchronous usage persistence follows the same pattern as pipeline nodes (they run in `asyncio.to_thread()`).
 
-### `tools/sandbox.py` (1034 lines, 37 KB)
+### `tools/sandbox.py` (1401 lines, 49 KB)
 **Purpose:** Code execution sandbox — the largest and most security-critical module.
 
 **What it does:**
@@ -380,7 +383,7 @@ Package marker.
 - **Tiered command safety:**
   - Tier 1 (`_BLOCKED_PATTERNS`, 39 patterns): Always blocked. `rm -rf /`, `sudo`, `curl|sh`, `chmod 777`, `mkfs`, `cat|bash`, fork bombs, etc.
   - Tier 3 (`_LOGGED_PATTERNS`, 12 patterns): Allowed but logged. `rm`, `chmod`, `git push`, `curl`, `python3 -c`, etc.
-  - Tier 4 (`_CODE_BLOCKED_PATTERNS`, 8 patterns): Scans Python code content for credential reads, `os.system()`, `shutil.rmtree(/)`, reverse shells.
+  - Tier 4 (`_CODE_BLOCKED_PATTERNS`, 51 patterns): Scans Python code content for credential reads, dangerous system calls, filesystem wipes, reverse shells, config imports, dynamic code, subprocess, obfuscation.
 - **Credential stripping:** `_filter_env()` removes API keys, tokens, secrets from subprocess environment via exact match and substring matching
 - **Docker execution:** `_run_code_docker()` executes code in an isolated container with only `workspace/` mounted read-write. Drops all capabilities, sets `no-new-privileges`, limits PIDs to 256.
 - **Subprocess execution:** `run_code()` and `run_shell()` use threaded Popen reading (v8 refactor) for live stdout streaming. Manual timeout with `os.killpg()` for process group kill.
@@ -389,7 +392,7 @@ Package marker.
 
 **Why this way:** The threaded Popen refactor (v8) replaced `proc.communicate(timeout)` to enable line-by-line stdout capture for live streaming. The tiered security model is defense-in-depth: Tier 1 is the hard block, Tier 3 provides audit trail, Tier 4 is defense-in-depth for the subprocess path. Docker provides the actual filesystem isolation boundary.
 
-### `tools/model_router.py` (160 lines, 5.4 KB) — NEW in v8
+### `tools/model_router.py` (202 lines, 6.8 KB) — NEW in v8
 **Purpose:** Routes LLM calls to Claude or Ollama based on purpose, complexity, RAM, and budget.
 
 **What it does:**
@@ -403,11 +406,11 @@ Package marker.
 - `_ollama_available()` — 2-second timeout check against Ollama API
 - `_ram_below_threshold()` — uses psutil to check memory usage
 - `_get_today_spend()` — queries `api_usage` table with UTC midnight cutoff
-- `_call_ollama()` — calls Ollama's `/api/generate` endpoint with 60s timeout
+- `_call_ollama()` — calls Ollama's `/api/chat` endpoint with 60s timeout (migrated from /api/generate in v8.4.1)
 
 **Why this way:** The router is a pre-step, not a replacement — it delegates to `claude_client.call()` for Claude calls and handles Ollama directly. Audit NEVER routes to Ollama because cross-model adversarial review is a core safety invariant. The Ollama fallback on failure ensures no silent degradation.
 
-### `tools/file_manager.py` (154 lines, 5.1 KB)
+### `tools/file_manager.py` (157 lines, 5.3 KB)
 **Purpose:** File operations for uploads, metadata extraction, and content reading.
 
 **What it does:**
@@ -418,7 +421,7 @@ Package marker.
 
 **Why this way:** Metadata-only extraction for large data files prevents loading gigabytes into Claude's context. The planner sees column names and sample rows, then writes code to process the full file locally.
 
-### `tools/projects.py` (100 lines, 3.2 KB)
+### `tools/projects.py` (105 lines, 3.4 KB)
 **Purpose:** Project registry loader and trigger matcher.
 
 **What it does:**
@@ -437,16 +440,17 @@ Package marker.
 ### `storage/__init__.py` (0 lines)
 Package marker.
 
-### `storage/db.py` (369 lines, 14 KB)
+### `storage/db.py` (468 lines, 18 KB)
 **Purpose:** SQLite database operations — async for bot handlers, synchronous for pipeline nodes.
 
 **Tables:**
 | Table | Purpose |
 |-------|---------|
-| `tasks` | Task records with status, result, timing |
+| `tasks` | Task records with status, result, timing, task_state, last_completed_stage |
 | `conversation_context` | Key-value context per user |
 | `conversation_history` | Message log per user (for context injection) |
 | `project_memory` (v8) | Success/failure patterns per project |
+| `api_usage` | API cost tracking: model, tokens, thinking_tokens, timestamp (managed in claude_client.py) |
 
 **What it does:**
 - `init_db()` — creates all tables, enables WAL mode for concurrent write safety, creates indexes
@@ -487,7 +491,7 @@ Package marker.
 
 ## tests/ — Test Suite
 
-527 tests across 18 files. 527 pass, 11 skip (require Docker Desktop).
+661 tests across 24 files. 625 pass, 36 skip (require Docker Desktop).
 
 ### Existing test files (pre-v8):
 
@@ -537,6 +541,12 @@ Package marker.
 **Purpose:** Monthly disk space recovery.
 
 **What it does:** VACUUMs SQLite databases (recovers freed pages), cleans Docker pip cache (removes packages unused 30+ days), runs Docker system prune. Designed to be run via cron or manually.
+
+### `scripts/com.agentsutra.bot.plist` (v8.6.0)
+**Purpose:** launchd service definition for Mac Mini auto-start/restart. KeepAlive with 30s ThrottleInterval.
+
+### `scripts/install_service.sh` (v8.6.0)
+**Purpose:** One-command service installation. Creates log directory, copies plist, loads via launchctl.
 
 ---
 
@@ -602,13 +612,13 @@ workspace/
 
 ## Documentation Files
 
-### `README.md` (349 lines, 15 KB)
+### `README.md` (335 lines, 14 KB)
 **Purpose:** Project overview, quick start guide, architecture summary, capabilities showcase. The public-facing document.
 
-### `AGENTSUTRA.md` (2055+ lines, 136 KB)
+### `AGENTSUTRA.md` (2431 lines, 136 KB)
 **Purpose:** Comprehensive technical documentation. Architecture deep-dive, every file explained, security threat model, deployment guides (launchd/systemd), model provider swapping, design philosophy, benchmarks, and full changelog from v1 through v8.
 
-### `USECASES.md` (654 lines, 28 KB)
+### `USECASES.md` (650 lines, 28 KB)
 **Purpose:** Capabilities guide with 50+ real-world examples across all 7 task types. Demonstrates what AgentSutra can actually do.
 
 ### `CODEBASE_REFERENCE.md` (this file)

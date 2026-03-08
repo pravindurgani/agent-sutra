@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import re
+import time as _time
 import uuid
 import asyncio
 import functools
@@ -15,7 +17,7 @@ import config
 from brain.graph import run_task, get_stage, clear_stage
 from storage import db
 from tools.file_manager import save_upload
-from tools.claude_client import get_usage_summary, get_cost_summary
+from tools.claude_client import get_usage_summary, get_cost_summary, get_daily_cost_breakdown, get_budget_remaining
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +77,9 @@ def auth_required(func):
     """Decorator to restrict access to allowed user IDs."""
     @functools.wraps(func)
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        # A-31: Guard against edited messages where update.message is None
+        if not update.message:
+            return
         if not update.effective_user:
             return
         user_id = update.effective_user.id
@@ -106,15 +111,58 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/exec <cmd> - Run a shell command directly\n"
         "/context - View/clear conversation memory\n"
         "/cancel - Cancel running task\n"
+        "/retry - Re-run a failed task\n"
         "/projects - List registered projects\n"
         "/schedule - Schedule a recurring task\n"
-        "/deploy <task_id> - Deploy frontend artifacts to live URL"
+        "/deploy <task_id> - Deploy frontend artifacts to live URL\n"
+        "/setup - Validate system configuration"
     )
 
 
 @auth_required
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /status command."""
+    """Handle /status command. Shows active tasks, or details for a specific task ID."""
+    text = update.message.text.replace("/status", "", 1).strip()
+
+    # If a task ID prefix is provided, show detailed state
+    if text:
+        task_id_prefix = text.split()[0]
+        if not re.match(r'^[a-f0-9-]+$', task_id_prefix):
+            await update.message.reply_text("Invalid task ID format.")
+            return
+        task = await db.get_task_by_prefix(task_id_prefix)
+        if not task:
+            await update.message.reply_text(f"No task found matching '{task_id_prefix}'.")
+            return
+        lines = [
+            f"Task {task['id'][:8]}",
+            f"Status: {task['status']}",
+            f"Type: {task.get('task_type', 'unknown')}",
+            f"Created: {task['created_at'][:19]}",
+        ]
+        if task.get("last_completed_stage"):
+            lines.append(f"Last stage: {task['last_completed_stage']}")
+        if task.get("task_state") and task["task_state"] != "{}":
+            try:
+                state = json.loads(task["task_state"])
+                if state.get("plan"):
+                    plan_preview = state["plan"][:200]
+                    lines.append(f"\nPlan: {plan_preview}")
+                if state.get("audit_verdict"):
+                    lines.append(f"Audit: {state['audit_verdict']}")
+                if state.get("audit_feedback"):
+                    lines.append(f"Feedback: {state['audit_feedback'][:200]}")
+                if state.get("stage_timings"):
+                    timing_parts = [f"{t['name']}={t['duration_ms']}ms" for t in state["stage_timings"]]
+                    lines.append(f"Timings: {', '.join(timing_parts)}")
+            except (json.JSONDecodeError, TypeError):
+                pass
+        if task.get("error"):
+            lines.append(f"\nError: {task['error'][:300]}")
+        await update.message.reply_text("\n".join(lines))
+        return
+
+    # Default: show active tasks
     running_tasks = context.user_data.get("running_tasks", {})
     if not running_tasks:
         await update.message.reply_text("No active tasks.")
@@ -187,6 +235,139 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     else:
         await update.message.reply_text("No running tasks to cancel.")
+
+
+@auth_required
+async def cmd_retry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /retry command - re-run a failed task with the same input.
+
+    Usage: /retry [task_id_prefix]
+    If no task ID given, retries the most recent failed task.
+    """
+    text = update.message.text.replace("/retry", "", 1).strip()
+    user_id = update.effective_user.id
+
+    if text:
+        task_id_prefix = text.split()[0]
+        if not re.match(r'^[a-f0-9-]+$', task_id_prefix):
+            await update.message.reply_text("Invalid task ID format.")
+            return
+        task = await db.get_task_by_prefix(task_id_prefix)
+    else:
+        # Find most recent failed/crashed task for this user
+        recent = await db.list_tasks(user_id, limit=10)
+        task = None
+        for t in recent:
+            if t["status"] in ("failed", "crashed"):
+                task = t
+                break
+
+    if not task:
+        await update.message.reply_text("No failed task found to retry.")
+        return
+
+    if task["status"] not in ("failed", "crashed"):
+        await update.message.reply_text(
+            f"Task {task['id'][:8]} has status '{task['status']}'. Only failed/crashed tasks can be retried."
+        )
+        return
+
+    # Resource guard
+    running_tasks = context.user_data.get("running_tasks", {})
+    rejection = _check_resources(running_tasks)
+    if rejection:
+        await update.message.reply_text(rejection)
+        return
+
+    # Re-submit as a new task with the original message
+    new_task_id = str(uuid.uuid4())
+    original_message = task["message"]
+    await db.create_task(new_task_id, user_id, original_message)
+    conversation_ctx = await db.build_conversation_context(user_id, limit=6)
+
+    status_msg = await update.message.reply_text(
+        f"Retrying task {task['id'][:8]} as {new_task_id[:8]}..."
+    )
+
+    try:
+        await db.update_task(new_task_id, status="running")
+
+        task_future = asyncio.ensure_future(
+            asyncio.wait_for(
+                asyncio.to_thread(
+                    run_task,
+                    task_id=new_task_id,
+                    user_id=user_id,
+                    message=original_message,
+                    files=[],
+                    conversation_context=conversation_ctx,
+                ),
+                timeout=config.LONG_TIMEOUT,
+            )
+        )
+
+        running_tasks = context.user_data.setdefault("running_tasks", {})
+        running_tasks[new_task_id] = task_future
+
+        # Stream status updates
+        last_edit_hash = 0
+        while not task_future.done():
+            await asyncio.sleep(3)
+            stage = get_stage(new_task_id)
+            if not stage:
+                continue
+            label = STAGE_LABELS.get(stage, stage)
+            if stage == "executing":
+                from tools.sandbox import get_live_output
+                tail = get_live_output(new_task_id, tail=3)
+                if tail:
+                    label += f"\n\nLatest output:\n{tail[-200:]}"
+            label += f" (retry of {task['id'][:8]})"
+            content_hash = hash(label)
+            if content_hash != last_edit_hash:
+                try:
+                    await status_msg.edit_text(label)
+                    last_edit_hash = content_hash
+                except Exception:
+                    pass
+
+        result = task_future.result()
+        running_tasks.pop(new_task_id, None)
+
+        try:
+            await status_msg.edit_text(f"Completed. (retry {new_task_id[:8]})")
+        except Exception:
+            pass
+
+        response_text = result.get("final_response", "Task completed but no output was generated.")
+        await _send_long_message(update, response_text)
+        await db.add_history(user_id, "assistant", response_text, new_task_id)
+
+        # Send artifacts
+        for fpath in result.get("artifacts", []):
+            p = Path(fpath)
+            if p.is_file() and p.stat().st_size < config.MAX_FILE_SIZE_BYTES:
+                try:
+                    with open(p, "rb") as f:
+                        await update.message.reply_document(document=f, filename=p.name)
+                except Exception as send_err:
+                    logger.warning("Failed to send retry artifact %s: %s", p.name, send_err)
+
+        await db.update_task(new_task_id, status="completed", result=response_text,
+                            completed_at=datetime.now(timezone.utc).isoformat())
+
+    except asyncio.CancelledError:
+        await db.update_task(new_task_id, status="cancelled")
+        await status_msg.edit_text(f"Retry {new_task_id[:8]} cancelled.")
+    except asyncio.TimeoutError:
+        await db.update_task(new_task_id, status="failed", error="Pipeline timeout")
+        await status_msg.edit_text(f"Retry {new_task_id[:8]} timed out.")
+    except Exception as e:
+        logger.exception("Retry pipeline error for task %s", new_task_id)
+        await db.update_task(new_task_id, status="failed", error=str(e)[:500])
+        await status_msg.edit_text(f"Retry {new_task_id[:8]} failed: {str(e)[:200]}")
+    finally:
+        running_tasks.pop(new_task_id, None)
 
 
 @auth_required
@@ -274,6 +455,32 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lines.append("Project venv issues:")
         lines.extend(venv_issues)
 
+    # Pipeline performance (last 24h)
+    try:
+        recent = await db.list_tasks(update.effective_user.id, limit=50)
+        completed_with_timings = []
+        for t in recent:
+            if t.get("task_state") and t["task_state"] != "{}":
+                try:
+                    state = json.loads(t["task_state"])
+                    if state.get("stage_timings"):
+                        completed_with_timings.append(state["stage_timings"])
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        if completed_with_timings:
+            stage_totals: dict[str, list[int]] = {}
+            for timings in completed_with_timings:
+                for entry in timings:
+                    stage_totals.setdefault(entry["name"], []).append(entry["duration_ms"])
+            lines.append(f"\nPipeline ({len(completed_with_timings)} recent tasks):")
+            for stage_name in ["classifying", "planning", "executing", "auditing", "delivering"]:
+                if stage_name in stage_totals:
+                    vals = stage_totals[stage_name]
+                    avg_ms = sum(vals) // len(vals)
+                    lines.append(f"  {stage_name}: {avg_ms}ms avg")
+    except Exception:
+        pass  # Pipeline stats are informational, never crash /health
+
     await update.message.reply_text("\n".join(lines))
 
 
@@ -352,22 +559,46 @@ async def cmd_context(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @auth_required
 async def cmd_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /cost command - show estimated API costs."""
+    """Handle /cost command - show estimated API costs with daily breakdown."""
     cost = get_cost_summary()
-    lines = [
-        "API Cost Estimate:",
-        f"Total calls: {cost['total_calls']}",
-        f"Input tokens: {cost['total_input_tokens']:,}",
-        f"Output tokens: {cost['total_output_tokens']:,}",
-    ]
-    if cost.get("total_thinking_tokens"):
-        lines.append(f"Thinking tokens: {cost['total_thinking_tokens']:,}")
-    lines.append(f"Estimated cost: ${cost['total_cost_usd']:.4f}")
-    if cost.get("by_model"):
-        lines.append("\nBy model:")
-        for model, info in cost["by_model"].items():
-            short_name = model.split("-")[-1] if "-" in model else model
-            lines.append(f"  {short_name}: {info['calls']} calls, ${info['cost_usd']:.4f}")
+    daily = get_daily_cost_breakdown(days=7)
+    budget = get_budget_remaining()
+
+    lines = ["Cost Summary (Last 7 Days)"]
+    lines.append("-" * 28)
+
+    # Daily breakdown
+    if daily:
+        for day in daily[:7]:
+            lines.append(f"{day['date']}:  ${day['cost_usd']:.2f}  ({day['calls']} calls)")
+    else:
+        lines.append("No API usage recorded.")
+
+    # Today's model breakdown
+    if daily:
+        today = daily[0] if daily else None
+        if today and today.get("by_model"):
+            lines.append(f"\nBy Model (Today)")
+            total_today = today["cost_usd"] or 1
+            for model, model_cost in sorted(today["by_model"].items(), key=lambda x: x[1], reverse=True):
+                pct = (model_cost / total_today * 100) if total_today > 0 else 0
+                lines.append(f"  {model}: ${model_cost:.2f} ({pct:.0f}%)")
+
+    # Lifetime totals
+    lines.append(f"\nLifetime: ${cost['total_cost_usd']:.2f} ({cost['total_calls']} calls)")
+
+    # Budget remaining
+    budget_parts = []
+    if budget.get("daily_limit"):
+        remaining = budget.get("daily_remaining")
+        if remaining is not None:
+            budget_parts.append(f"${remaining:.2f} daily")
+    if budget.get("monthly_limit"):
+        remaining = budget.get("monthly_remaining")
+        if remaining is not None:
+            budget_parts.append(f"${remaining:.2f} monthly")
+    if budget_parts:
+        lines.append(f"Budget remaining: {' / '.join(budget_parts)}")
 
     await update.message.reply_text("\n".join(lines))
 
@@ -548,7 +779,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Rate limiter: prevent accidental double-sends (5s cooldown)
     last_submit = context.user_data.get("last_task_submit", 0)
-    now_ts = asyncio.get_event_loop().time()
+    # A-32: Use time.monotonic() instead of deprecated asyncio.get_event_loop().time()
+    now_ts = _time.monotonic()
     if now_ts - last_submit < 5:
         await update.message.reply_text("Please wait a few seconds between tasks.")
         return
@@ -569,8 +801,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Build conversation context from recent history
     conversation_ctx = await db.build_conversation_context(user_id, limit=6)
 
+    # Budget warning: notify user if >80% daily budget consumed
+    budget_warning = ""
+    try:
+        budget = get_budget_remaining()
+        if budget.get("daily_limit") and budget.get("daily_spent"):
+            utilization = budget["daily_spent"] / budget["daily_limit"]
+            if utilization > 0.8:
+                budget_warning = f" (budget >80% — routing classify/plan to local model)"
+    except Exception:
+        pass
+
     # Send initial status message that we'll update with streaming status
-    status_msg = await update.message.reply_text(f"Starting... (task {task_id[:8]})")
+    status_msg = await update.message.reply_text(f"Starting... (task {task_id[:8]}){budget_warning}")
 
     try:
         await db.update_task(task_id, status="running")
@@ -744,6 +987,10 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     saved_path = save_upload(bytes(data), filename)
 
     pending = context.user_data.setdefault("pending_files", [])
+    # A-17: Cap pending files to prevent unbounded memory growth
+    if len(pending) >= 10:
+        await update.message.reply_text("Too many pending files (max 10). Send a task first.")
+        return
     pending.append(str(saved_path))
 
     await update.message.reply_text(
@@ -786,6 +1033,13 @@ async def cmd_chain(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("A chain needs at least 2 steps separated by ->")
         return
 
+    # A-16: Concurrency guard — chains consume resources like regular tasks
+    running_tasks = context.user_data.get("running_tasks", {})
+    rejection = _check_resources(running_tasks)
+    if rejection:
+        await update.message.reply_text(rejection)
+        return
+
     base_id = str(uuid.uuid4())[:8]
     previous_artifacts: list[str] = []
 
@@ -795,6 +1049,7 @@ async def cmd_chain(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     for i, step in enumerate(steps):
+        # D-3: Safe — base_id is UUID hex prefix (no hyphens in hex), so -step{i} suffix never collides
         step_id = f"{base_id}-step{i}"
 
         # Replace {output} with actual artifact paths from previous step
@@ -911,6 +1166,11 @@ async def cmd_deploy(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     task_id_prefix = args[0]
 
+    # A-14: Validate task_id_prefix — only hex chars and hyphens (no glob metacharacters)
+    if not re.match(r'^[a-f0-9-]+$', task_id_prefix):
+        await update.message.reply_text("Invalid task ID format.")
+        return
+
     # Find HTML artifacts matching the task ID prefix
     html_files = list(config.OUTPUTS_DIR.glob(f"*{task_id_prefix}*.html"))
     if not html_files:
@@ -975,6 +1235,83 @@ async def cmd_servers(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 @auth_required
+async def cmd_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /setup command - validate system configuration and report health."""
+    from tools.projects import get_projects
+
+    checks: list[tuple[str, bool | str]] = []
+
+    # 1. Required environment variables
+    for key in ["ANTHROPIC_API_KEY", "TELEGRAM_BOT_TOKEN", "ALLOWED_USER_IDS"]:
+        checks.append((f"env:{key}", bool(getattr(config, key, None))))
+
+    # 2. Ollama connectivity
+    try:
+        import requests
+        resp = requests.get(f"{config.OLLAMA_BASE_URL}/api/tags", timeout=5)
+        if resp.ok:
+            models = [m.get("name", "") for m in resp.json().get("models", [])]
+            checks.append(("ollama:connected", True))
+            has_model = any(config.OLLAMA_DEFAULT_MODEL in m for m in models)
+            checks.append((f"ollama:{config.OLLAMA_DEFAULT_MODEL}", has_model))
+        else:
+            checks.append(("ollama:connected", False))
+    except Exception:
+        checks.append(("ollama:connected", False))
+
+    # 3. Project registry
+    projects = get_projects()
+    for p in projects:
+        path_ok = Path(p.get("path", "")).is_dir() if p.get("path") else False
+        checks.append((f"project:{p['name']}", path_ok))
+
+    # 4. Database writable
+    try:
+        conn = __import__("sqlite3").connect(str(config.DB_PATH), timeout=5.0)
+        conn.execute("SELECT 1")
+        conn.close()
+        checks.append(("db:writable", True))
+    except Exception:
+        checks.append(("db:writable", False))
+
+    # 5. Budget configuration
+    if config.DAILY_BUDGET_USD:
+        checks.append(("budget:daily", f"${config.DAILY_BUDGET_USD}"))
+    else:
+        checks.append(("budget:daily", "unlimited"))
+    if config.MONTHLY_BUDGET_USD:
+        checks.append(("budget:monthly", f"${config.MONTHLY_BUDGET_USD}"))
+    else:
+        checks.append(("budget:monthly", "unlimited"))
+
+    # 6. Workspace writable
+    try:
+        test_file = config.WORKSPACE_DIR / ".setup_test"
+        test_file.write_text("ok")
+        test_file.unlink()
+        checks.append(("workspace:writable", True))
+    except Exception:
+        checks.append(("workspace:writable", False))
+
+    # Format output
+    lines = [f"AgentSutra v{config.VERSION} Setup Check", "-" * 30]
+    pass_count = 0
+    for name, status in checks:
+        if isinstance(status, bool):
+            icon = "OK" if status else "FAIL"
+            if status:
+                pass_count += 1
+        else:
+            icon = str(status)
+            pass_count += 1
+        lines.append(f"  [{icon}] {name}")
+
+    total = len(checks)
+    lines.append(f"\n{pass_count}/{total} checks passed")
+    await update.message.reply_text("\n".join(lines))
+
+
+@auth_required
 async def cmd_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show debug sidecar JSON for a task: /debug <task_id>."""
     args = context.args
@@ -982,12 +1319,19 @@ async def cmd_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Usage: /debug <task_id>")
         return
     task_id_prefix = args[0]
+
+    # A-15: Validate task_id_prefix — only hex chars and hyphens (no glob metacharacters)
+    if not re.match(r'^[a-f0-9-]+$', task_id_prefix):
+        await update.message.reply_text("Invalid task ID format.")
+        return
+
     matches = list(config.OUTPUTS_DIR.glob(f"{task_id_prefix}*.debug.json"))
     if not matches:
         await update.message.reply_text(f"No debug data found for '{task_id_prefix}'")
         return
     content = matches[0].read_text()
-    await update.message.reply_text(f"```\n{content[:3800]}\n```", parse_mode="Markdown")
+    # A-30: Send as plain text — JSON contains chars that break Markdown parse mode
+    await update.message.reply_text(content[:3900])
 
 
 async def _send_long_message(update: Update, text: str):

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import logging.handlers
+import signal
 import sys
 
 import config  # noqa: E402 - must load .env before other imports
@@ -185,6 +186,21 @@ def main():
 
     bot.post_init = on_startup
     bot.post_shutdown = on_shutdown
+
+    # A-37: SIGTERM handler for clean shutdown (WAL checkpoint)
+    def _sigterm_handler(signum, frame):
+        logger.info("Received SIGTERM — initiating clean shutdown")
+        import sqlite3
+        try:
+            conn = sqlite3.connect(str(config.DB_PATH), timeout=5.0)
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            conn.close()
+            logger.info("WAL checkpoint completed")
+        except Exception as e:
+            logger.warning("WAL checkpoint failed on SIGTERM: %s", e)
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, _sigterm_handler)
 
     logger.info("Starting Telegram bot (polling mode)...")
     logger.info("Send /start to your bot to begin")

@@ -27,11 +27,11 @@ class TestStripMarkdownBlocks:
         text = '```\nx = 1\n```'
         assert _strip_markdown_blocks(text) == "x = 1"
 
-    def test_multiple_blocks_returns_longest(self):
+    def test_multiple_blocks_returns_first(self):
+        """A-19: Return first block (not longest) to prevent gaming."""
         text = '```python\nshort\n```\n\n```python\nthis is the longer code block\nwith multiple lines\n```'
         result = _strip_markdown_blocks(text)
-        assert "longer code block" in result
-        assert "multiple lines" in result
+        assert result == "short"
 
     def test_no_markdown_returns_original(self):
         text = 'print("hello")'

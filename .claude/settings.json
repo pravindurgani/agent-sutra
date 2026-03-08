@@ -1,0 +1,37 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c \"import json,sys; d=json.load(sys.stdin); p=d.get('tool_input',{}).get('file_path',''); protected=['.env','.env.example','projects.yaml','projects_macmini.yaml','agentsutra.db','scheduler.db']; sys.exit(2) if any(p.endswith(x) for x in protected) else sys.exit(0)\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c \"import json,sys; d=json.load(sys.stdin); p=d.get('tool_input',{}).get('file_path',''); print(f'Edited: {p}') if p.endswith('.py') else None\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '' >> CLAUDE.md && echo '<!-- session ended: '$(date '+%Y-%m-%d %H:%M')' -->' >> CLAUDE.md"
+          }
+        ]
+      }
+    ]
+  }
+}

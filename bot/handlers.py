@@ -813,7 +813,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
 
     # Send initial status message that we'll update with streaming status
-    status_msg = await update.message.reply_text(f"Starting... (task {task_id[:8]}){budget_warning}")
+    status_msg = await update.message.reply_text(f"Processing... (task {task_id[:8]}){budget_warning}")
 
     try:
         await db.update_task(task_id, status="running")

@@ -273,3 +273,73 @@ class TestBootstrapProjectDeps:
 
         call_cmd = mock_shell.call_args[0][0]
         assert "/path/to/venv/bin/pip" in call_cmd
+
+
+# ── _detect_truncation (Phase 0a) ────────────────────────────────
+
+
+from brain.nodes.executor import _detect_truncation
+
+
+class TestDetectTruncationShebangGuard:
+    """Shell if/fi truncation checks must only fire for actual shell scripts."""
+
+    def test_detect_truncation_python_many_ifs_not_truncated(self):
+        """Python code with 20 if statements, no shebang → NOT truncated."""
+        lines = ["import sys\n"]
+        for i in range(20):
+            lines.append(f"if x > {i}:\n    print({i})\n")
+        lines.append('print("done")\n')
+        code = "".join(lines)
+        assert _detect_truncation(code) is False
+
+    def test_detect_truncation_shell_script_unclosed_if(self):
+        """Bash script with shebang, 5 if and 0 fi → truncated."""
+        code = "#!/bin/bash\n"
+        for i in range(5):
+            code += f'if [ -f file{i} ]; then\n  echo "found {i}"\n'
+        assert _detect_truncation(code) is True
+
+    def test_detect_truncation_shell_script_balanced(self):
+        """Bash script with balanced if/fi → NOT truncated."""
+        code = (
+            "#!/bin/bash\n"
+            "if [ -f config.sh ]; then\n"
+            "  source config.sh\n"
+            "fi\n"
+            "if [ -z \"$DB_HOST\" ]; then\n"
+            "  export DB_HOST=localhost\n"
+            "fi\n"
+            "echo done\n"
+        )
+        assert _detect_truncation(code) is False
+
+    def test_detect_truncation_python_still_catches_parens(self):
+        """Python code with many unclosed parens still returns True."""
+        code = (
+            "import pandas as pd\n"
+            "result = func(\n"
+            "    inner(\n"
+            "        deep(\n"
+            "            deeper(\n"
+        )
+        assert _detect_truncation(code) is True
+
+    def test_detect_truncation_shell_no_shebang_unclosed_parens(self):
+        """Shell-style code without shebang but with 5 unclosed parens → caught by paren check."""
+        code = "echo hello\nfoo(\nbar(\nbaz(\nqux(\nquux(\n"
+        assert _detect_truncation(code) is True
+
+    def test_detect_truncation_env_bash_shebang(self):
+        """#!/usr/bin/env bash shebang is recognised as shell."""
+        code = "#!/usr/bin/env bash\n"
+        for i in range(5):
+            code += f"if [ -d dir{i} ]; then\n  ls dir{i}\n"
+        assert _detect_truncation(code) is True
+
+    def test_detect_truncation_env_sh_shebang(self):
+        """#!/usr/bin/env sh shebang is recognised as shell."""
+        code = "#!/usr/bin/env sh\n"
+        for i in range(5):
+            code += f"if [ -d dir{i} ]; then\n  ls dir{i}\n"
+        assert _detect_truncation(code) is True

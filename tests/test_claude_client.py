@@ -102,3 +102,34 @@ class TestCallRetryOnEmptyResponse:
 
         # Should fail on first attempt, not retry
         assert mock_client.return_value.messages.create.call_count == 1
+
+
+# ── Phase 0b: /cost model name display ────────────────────────────
+
+
+class TestCostSummaryModelNameDisplay:
+    """get_daily_cost_breakdown() must display readable model names."""
+
+    @patch("tools.claude_client._init_usage_db")
+    @patch("tools.claude_client.sqlite3")
+    def test_cost_summary_model_name_display(self, mock_sqlite, mock_init):
+        """claude-sonnet-4-6 → 'sonnet-4', claude-opus-4-6 → 'opus-4', not '6'."""
+        from tools.claude_client import get_daily_cost_breakdown
+        from datetime import datetime, timezone
+
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+        mock_conn = MagicMock()
+        mock_sqlite.connect.return_value = mock_conn
+        mock_conn.execute.return_value.fetchall.return_value = [
+            (today, "claude-sonnet-4-6", 10, 1000, 500, 0),
+            (today, "claude-opus-4-6", 5, 800, 400, 100),
+        ]
+
+        result = get_daily_cost_breakdown(days=7)
+
+        assert len(result) >= 1
+        by_model = result[0]["by_model"]
+        assert "sonnet-4" in by_model, f"Expected 'sonnet-4' in {by_model.keys()}"
+        assert "opus-4" in by_model, f"Expected 'opus-4' in {by_model.keys()}"
+        assert "6" not in by_model, f"'6' should not appear in {by_model.keys()}"

@@ -370,7 +370,7 @@ def get_daily_cost_breakdown(days: int = 7) -> list[dict]:
                 days_map[day] = {"date": day, "calls": 0, "cost_usd": 0.0, "by_model": {}}
             days_map[day]["calls"] += calls
             days_map[day]["cost_usd"] += cost_usd
-            short = model.split("-")[-1] if "-" in model else model
+            short = model.replace("claude-", "").rsplit("-", 1)[0] if model.startswith("claude-") else model
             days_map[day]["by_model"][short] = days_map[day]["by_model"].get(short, 0.0) + cost_usd
 
         result = sorted(days_map.values(), key=lambda d: d["date"], reverse=True)

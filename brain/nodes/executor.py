@@ -88,13 +88,24 @@ def _detect_truncation(code: str) -> bool:
         or ends_mid_string
     )
 
-    # 7D: Shell script truncation — unclosed if/fi and do/done blocks
-    if_count = len(re.findall(r'\bif\b', stripped))
-    fi_count = len(re.findall(r'\bfi\b', stripped))
-    do_count = len(re.findall(r'\bdo\b', stripped))
-    done_count = len(re.findall(r'\bdone\b', stripped))
-    shell_truncated = (if_count > fi_count + 2) or (do_count > done_count + 1)
-    truncated = truncated or shell_truncated
+    # 7D: Shell script truncation — only for actual shell scripts
+    _is_shell = False
+    for line in stripped.split("\n"):
+        line = line.strip()
+        if not line or line.startswith("#!"):
+            if line.startswith("#!") and ("bash" in line or "/sh" in line or line.endswith(" sh")):
+                _is_shell = True
+            break
+        break  # first non-empty line isn't a shebang
+
+    if_count = fi_count = do_count = done_count = 0
+    if _is_shell:
+        if_count = len(re.findall(r'\bif\b', stripped))
+        fi_count = len(re.findall(r'\bfi\b', stripped))
+        do_count = len(re.findall(r'\bdo\b', stripped))
+        done_count = len(re.findall(r'\bdone\b', stripped))
+        shell_truncated = (if_count > fi_count + 2) or (do_count > done_count + 1)
+        truncated = truncated or shell_truncated
 
     if truncated:
         logger.warning(

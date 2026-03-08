@@ -145,7 +145,7 @@ def _get_today_spend() -> float:
         total = 0.0
         for model, inp, out, think in rows:
             think = think or 0
-            costs = _MODEL_COSTS.get(model, {"input": 3.00, "output": 15.00})
+            costs = _MODEL_COSTS.get(model, {"input": 15.00, "output": 75.00})
             total += (inp * costs["input"] + (out + think) * costs["output"]) / 1_000_000
         return total
 

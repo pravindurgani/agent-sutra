@@ -88,12 +88,21 @@ def _detect_truncation(code: str) -> bool:
         or ends_mid_string
     )
 
+    # 7D: Shell script truncation — unclosed if/fi and do/done blocks
+    if_count = len(re.findall(r'\bif\b', stripped))
+    fi_count = len(re.findall(r'\bfi\b', stripped))
+    do_count = len(re.findall(r'\bdo\b', stripped))
+    done_count = len(re.findall(r'\bdone\b', stripped))
+    shell_truncated = (if_count > fi_count + 2) or (do_count > done_count + 1)
+    truncated = truncated or shell_truncated
+
     if truncated:
         logger.warning(
             "Code appears truncated: parens=%d brackets=%d braces=%d "
-            "triple_single=%s triple_double=%s ends_mid_string=%s",
+            "triple_single=%s triple_double=%s ends_mid_string=%s shell_if=%d/%d shell_do=%d/%d",
             open_parens, open_brackets, open_braces,
             triple_single, triple_double, ends_mid_string,
+            if_count, fi_count, do_count, done_count,
         )
     return truncated
 

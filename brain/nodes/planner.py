@@ -336,18 +336,30 @@ def _inject_project_files(state: AgentState, system: str) -> str:
     )
 
     try:
-        selection = claude_client.call(
-            selector_prompt,
-            system=_FILE_SELECTOR_SYSTEM,
-            max_tokens=300,
-            temperature=0.0,
-        )
-        selected = json.loads(selection)
-        if not isinstance(selected, list):
-            raise ValueError("Expected a JSON list")
-    except (json.JSONDecodeError, ValueError) as e:
-        logger.warning("File selector returned unparseable response: %s", e)
-        return system
+        selected = None
+        for attempt in range(2):
+            selection = claude_client.call(
+                selector_prompt,
+                system=_FILE_SELECTOR_SYSTEM,
+                max_tokens=300,
+                temperature=0.0,
+            )
+            try:
+                selected = json.loads(selection)
+                if not isinstance(selected, list):
+                    raise ValueError("Expected a JSON list")
+                break
+            except (json.JSONDecodeError, ValueError):
+                if attempt == 0:
+                    logger.warning(
+                        "File selector parse failure (task %s), retrying. Raw: %s",
+                        state.get("task_id", "?"), selection[:200],
+                    )
+                    continue
+                logger.warning("File selector failed twice, falling back to enumeration")
+                selected = []
+        if selected is None:
+            selected = []
     except Exception as e:
         logger.warning("File selector call failed: %s", e)
         return system

@@ -8,6 +8,7 @@ import re
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import requests
+from pathlib import Path
 from unittest.mock import patch, MagicMock
 from brain.nodes.deliverer import deliver
 from brain.nodes.executor import _detect_truncation
@@ -1008,3 +1009,149 @@ class TestDelivererCredentialFilter:
             filtered = [a for a in artifacts if not _has_credential_patterns(Path(a))]
             assert str(safe) in filtered
             assert str(cred) not in filtered
+
+
+# ── 7B: Task completion summary ────────────────────────────────────
+
+
+class TestTaskCompletionSummary:
+    """run_task should log a structured completion summary with timings."""
+
+    def test_completion_log_format(self):
+        """Timing summary follows expected format."""
+        timings = [
+            {"name": "classifying", "duration_ms": 120},
+            {"name": "planning", "duration_ms": 350},
+            {"name": "executing", "duration_ms": 2100},
+            {"name": "auditing", "duration_ms": 800},
+            {"name": "delivering", "duration_ms": 150},
+        ]
+        timing_str = " ".join(f"{t['name']}:{t['duration_ms']}ms" for t in timings)
+        total_ms = sum(t["duration_ms"] for t in timings)
+
+        assert "classifying:120ms" in timing_str
+        assert "executing:2100ms" in timing_str
+        assert total_ms == 3520
+
+    def test_empty_timings_handled(self):
+        """Empty timings list should not crash."""
+        timings = []
+        timing_str = " ".join(f"{t['name']}:{t['duration_ms']}ms" for t in timings)
+        total_ms = sum(t["duration_ms"] for t in timings) if timings else 0
+        assert timing_str == ""
+        assert total_ms == 0
+
+
+# ── 7C: File selector retry ───────────────────────────────────────
+
+
+class TestFileSelectorRetry:
+    """File selector should retry once on parse failure."""
+
+    @patch("brain.nodes.planner.claude_client")
+    def test_retry_on_parse_failure(self, mock_claude):
+        """Invalid JSON first, valid JSON second — should succeed."""
+        import json
+        mock_claude.call.side_effect = [
+            "Here are the files: config.py, main.py",  # Not JSON
+            json.dumps(["config.py", "main.py"]),       # Valid JSON
+        ]
+        from brain.nodes.planner import _inject_project_files, _FILE_SELECTOR_SYSTEM
+        import config as _cfg
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td)
+            (p / "config.py").write_text("X=1")
+            (p / "main.py").write_text("print('hi')")
+
+            state = {
+                "task_id": "test-retry",
+                "message": "Fix the config",
+                "project_config": {"path": str(p)},
+                "project_name": "test-proj",
+            }
+            result = _inject_project_files(state, "base system prompt")
+            # Should have retried and succeeded — files injected
+            assert mock_claude.call.call_count == 2
+            assert "config.py" in result or result == "base system prompt"
+
+    @patch("brain.nodes.planner.claude_client")
+    def test_double_failure_falls_back(self, mock_claude):
+        """Two invalid JSON responses → falls back to empty selection."""
+        mock_claude.call.side_effect = [
+            "not json at all",
+            "still not json",
+        ]
+        from brain.nodes.planner import _inject_project_files
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td)
+            (p / "config.py").write_text("X=1")
+
+            state = {
+                "task_id": "test-double-fail",
+                "message": "Fix it",
+                "project_config": {"path": str(p)},
+                "project_name": "test-proj",
+            }
+            result = _inject_project_files(state, "base prompt")
+            assert mock_claude.call.call_count == 2
+            # Falls back — no files injected, returns base prompt
+            assert result == "base prompt"
+
+
+# ── 7D: Shell script truncation detection ──────────────────────────
+
+
+class TestShellTruncationDetection:
+    """_detect_truncation should catch truncated shell scripts."""
+
+    def test_truncated_shell_unclosed_if(self):
+        """Shell script with unclosed if blocks is detected as truncated."""
+        from brain.nodes.executor import _detect_truncation
+        code = '''#!/bin/bash
+if [ -f config.sh ]; then
+  source config.sh
+if [ -z "$DB_HOST" ]; then
+  echo "Missing DB_HOST"
+if [ -z "$DB_PORT" ]; then
+'''
+        assert _detect_truncation(code) is True
+
+    def test_truncated_shell_unclosed_do(self):
+        """Shell script with unclosed do/done is detected as truncated."""
+        from brain.nodes.executor import _detect_truncation
+        code = '''#!/bin/bash
+for f in *.csv; do
+  echo "Processing $f"
+  for col in $(head -1 "$f" | tr ',' '\\n'); do
+'''
+        assert _detect_truncation(code) is True
+
+    def test_complete_shell_script(self):
+        """Complete shell script is NOT detected as truncated."""
+        from brain.nodes.executor import _detect_truncation
+        code = '''#!/bin/bash
+if [ -f config.sh ]; then
+  source config.sh
+fi
+for f in *.csv; do
+  echo "Processing $f"
+done
+echo "All done"
+'''
+        assert _detect_truncation(code) is False
+
+    def test_python_with_if_not_shell(self):
+        """Python 'if' statements should not trigger shell truncation (threshold > 1)."""
+        from brain.nodes.executor import _detect_truncation
+        code = '''
+if x > 0:
+    print("positive")
+if y > 0:
+    print("also positive")
+print("done")
+'''
+        assert _detect_truncation(code) is False

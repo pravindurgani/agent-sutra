@@ -137,7 +137,14 @@ def run_task(
     logger.info("Starting agent pipeline for task %s", task_id)
     try:
         result = agent_graph.invoke(initial_state)
-        logger.info("Pipeline complete for task %s: verdict=%s", task_id, result.get("audit_verdict"))
+        timings = result.get("stage_timings", [])
+        timing_str = " ".join(f"{t['name']}:{t['duration_ms']}ms" for t in timings)
+        total_ms = sum(t["duration_ms"] for t in timings) if timings else 0
+        logger.info(
+            "Task %s completed in %.1fs [%s] verdict=%s type=%s",
+            task_id, total_ms / 1000, timing_str,
+            result.get("audit_verdict", "?"), result.get("task_type", "?"),
+        )
         return result
     finally:
         clear_stage(task_id)

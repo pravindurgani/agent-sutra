@@ -11,7 +11,16 @@ from __future__ import annotations
 
 from unittest.mock import patch, MagicMock
 
+import pytest
 
+_has_playwright = True
+try:
+    import playwright  # noqa: F401
+except ImportError:
+    _has_playwright = False
+
+
+@pytest.mark.skipif(not _has_playwright, reason="playwright not installed")
 class TestCheckPageSuccess:
     """Verify check_page returns correct fields on success."""
 
@@ -64,6 +73,7 @@ class TestCheckPageNoPlaywright:
         assert "not installed" in result.error.lower() or "playwright" in result.error.lower()
 
 
+@pytest.mark.skipif(not _has_playwright, reason="playwright not installed")
 class TestCheckPageTimeout:
     """Verify timeout during navigation is handled gracefully."""
 
@@ -92,6 +102,7 @@ class TestCheckPageTimeout:
         assert "timeout" in result.error.lower()
 
 
+@pytest.mark.skipif(not _has_playwright, reason="playwright not installed")
 class TestCheckPageConsoleErrors:
     """Verify console errors are captured."""
 

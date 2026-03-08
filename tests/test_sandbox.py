@@ -22,7 +22,10 @@ from tools.sandbox import (
     _PIP_NAME_MAP,
 )
 from pathlib import Path
+import pytest
 import config
+
+_desktop_exists = (config.HOST_HOME / "Desktop").is_dir()
 
 
 # ── Blocked command patterns (Tier 1) ──────────────────────────────
@@ -799,6 +802,7 @@ class TestShellContentSafety:
 # ── File detection (mtime-aware snapshot) ─────────────────────────
 
 
+@pytest.mark.skipif(not _desktop_exists, reason="~/Desktop not available (CI)")
 class TestFileDetection:
     """run_code and run_shell must detect both new AND overwritten files.
 
@@ -1185,6 +1189,7 @@ class TestStdinDevNull:
         assert result.success
         assert "stdin-safe" in result.stdout
 
+    @pytest.mark.skipif(not _desktop_exists, reason="~/Desktop not available (CI)")
     def test_run_shell_sets_devnull_stdin(self):
         """run_shell() should work even when parent stdin is invalid."""
         from tools.sandbox import run_shell

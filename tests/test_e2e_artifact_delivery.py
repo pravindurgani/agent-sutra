@@ -18,10 +18,15 @@ import shutil
 import tempfile
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import config
 from tools.sandbox import run_code
+
+_desktop_exists = (config.HOST_HOME / "Desktop").is_dir()
+pytestmark = pytest.mark.skipif(not _desktop_exists, reason="~/Desktop not available (CI)")
 
 
 def _make_project_dir():

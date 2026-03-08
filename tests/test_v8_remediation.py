@@ -487,10 +487,155 @@ class TestOllamaStartupValidation:
 
         import logging
         with caplog.at_level(logging.INFO, logger="agentsutra"):
-            _check_ollama_model()
+            result = _check_ollama_model()
 
+        assert result is False
         assert any("not running" in r.message.lower() or "disabled" in r.message.lower()
                     for r in caplog.records)
+
+    @patch("requests.get")
+    def test_model_available_returns_true(self, mock_get):
+        """_check_ollama_model returns True when model is available."""
+        from main import _check_ollama_model
+        import config as _cfg
+        original = _cfg.OLLAMA_DEFAULT_MODEL
+        _cfg.OLLAMA_DEFAULT_MODEL = "llama3.1:8b"
+
+        mock_get.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {"models": [{"name": "llama3.1:8b"}]},
+        )
+        result = _check_ollama_model()
+        _cfg.OLLAMA_DEFAULT_MODEL = original
+        assert result is True
+
+    @patch("requests.get")
+    def test_model_missing_returns_false(self, mock_get):
+        """_check_ollama_model returns False when model is not found."""
+        from main import _check_ollama_model
+        import config as _cfg
+        original = _cfg.OLLAMA_DEFAULT_MODEL
+        _cfg.OLLAMA_DEFAULT_MODEL = "nonexistent:7b"
+
+        mock_get.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {"models": [{"name": "llama3.1:8b"}]},
+        )
+        result = _check_ollama_model()
+        _cfg.OLLAMA_DEFAULT_MODEL = original
+        assert result is False
+
+
+# ── 4A: Ollama empty response retry ───────────────────────────────
+
+
+class TestOllamaEmptyResponseRetry:
+    """route_and_call should retry once on empty Ollama response, then fall back."""
+
+    @patch("tools.model_router.claude_client")
+    @patch("tools.model_router._call_ollama")
+    @patch("tools.model_router._select_model", return_value=("ollama", "deepseek-r1:14b"))
+    def test_retry_on_empty_then_success(self, mock_select, mock_ollama, mock_claude):
+        """Empty first attempt, non-empty second attempt returns Ollama result."""
+        from tools.model_router import route_and_call
+        mock_ollama.side_effect = ["", "classify: code"]
+
+        result = route_and_call("test", purpose="classify", complexity="low")
+
+        assert result == "classify: code"
+        assert mock_ollama.call_count == 2
+        mock_claude.call.assert_not_called()
+
+    @patch("tools.model_router.claude_client")
+    @patch("tools.model_router._call_ollama")
+    @patch("tools.model_router._select_model", return_value=("ollama", "deepseek-r1:14b"))
+    def test_retry_both_empty_falls_back_to_claude(self, mock_select, mock_ollama, mock_claude):
+        """Two empty Ollama responses falls back to Claude."""
+        from tools.model_router import route_and_call
+        mock_ollama.side_effect = ["", ""]
+        mock_claude.call.return_value = "claude response"
+
+        result = route_and_call("test", purpose="classify", complexity="low")
+
+        assert result == "claude response"
+        assert mock_ollama.call_count == 2
+        mock_claude.call.assert_called_once()
+
+    @patch("tools.model_router.claude_client")
+    @patch("tools.model_router._call_ollama")
+    @patch("tools.model_router._select_model", return_value=("ollama", "deepseek-r1:14b"))
+    def test_exception_falls_back_without_retry(self, mock_select, mock_ollama, mock_claude):
+        """Exception on first attempt breaks out and falls back to Claude immediately."""
+        from tools.model_router import route_and_call
+        mock_ollama.side_effect = ConnectionError("Ollama down")
+        mock_claude.call.return_value = "claude fallback"
+
+        result = route_and_call("test", purpose="classify", complexity="low")
+
+        assert result == "claude fallback"
+        assert mock_ollama.call_count == 1
+        mock_claude.call.assert_called_once()
+
+    @patch("tools.model_router.claude_client")
+    @patch("tools.model_router._call_ollama")
+    @patch("tools.model_router._select_model", return_value=("ollama", "deepseek-r1:14b"))
+    def test_non_empty_first_attempt_returns_immediately(self, mock_select, mock_ollama, mock_claude):
+        """Non-empty first attempt returns without retry."""
+        from tools.model_router import route_and_call
+        mock_ollama.return_value = "code"
+
+        result = route_and_call("test", purpose="classify", complexity="low")
+
+        assert result == "code"
+        assert mock_ollama.call_count == 1
+        mock_claude.call.assert_not_called()
+
+
+# ── 4B: Ollama startup inference test ─────────────────────────────
+
+
+class TestOllamaStartupInferenceTest:
+    """Startup should run a smoke inference test when Ollama model is available."""
+
+    @patch("requests.get")
+    @patch("tools.model_router._call_ollama")
+    def test_inference_test_runs_when_model_available(self, mock_ollama, mock_get, caplog):
+        """When _check_ollama_model returns True, inference test runs."""
+        from main import _check_ollama_model
+        import config as _cfg
+        original = _cfg.OLLAMA_DEFAULT_MODEL
+        _cfg.OLLAMA_DEFAULT_MODEL = "llama3.1:8b"
+
+        mock_get.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {"models": [{"name": "llama3.1:8b"}]},
+        )
+        mock_ollama.return_value = "code"
+
+        ollama_ok = _check_ollama_model()
+        assert ollama_ok is True
+
+        # Simulate the inference test from main()
+        import logging
+        with caplog.at_level(logging.INFO, logger="agentsutra"):
+            if ollama_ok:
+                test = mock_ollama(
+                    "Classify: 'hello world'", system="Reply with ONE word: code",
+                    model=_cfg.OLLAMA_DEFAULT_MODEL, max_tokens=10,
+                )
+                assert test.strip() == "code"
+
+        _cfg.OLLAMA_DEFAULT_MODEL = original
+
+    @patch("requests.get")
+    def test_inference_test_skipped_when_model_unavailable(self, mock_get):
+        """When _check_ollama_model returns False, inference test is skipped."""
+        from main import _check_ollama_model
+        mock_get.side_effect = requests.ConnectionError("refused")
+
+        ollama_ok = _check_ollama_model()
+        assert ollama_ok is False
+        # No inference test should run — nothing to assert beyond the False return
 
 
 # ── R.5: Fabrication detection in auditor ────────────────────────

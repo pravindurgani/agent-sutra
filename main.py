@@ -76,28 +76,32 @@ def _ensure_shared_project_venv():
         logger.error("Failed to bootstrap shared project venv: %s", e)
 
 
-def _check_ollama_model():
+def _check_ollama_model() -> bool:
     """Validate that the configured Ollama model is available at startup.
 
     Non-blocking: logs a warning if Ollama is unreachable or the model is missing.
     The pipeline will still fall back to Claude at runtime.
+
+    Returns:
+        True if model is available and ready, False otherwise.
     """
     try:
         import requests
     except ImportError:
         logger.info("requests not available — skipping Ollama check")
-        return
+        return False
     try:
         r = requests.get(f"{config.OLLAMA_BASE_URL}/api/tags", timeout=3)
         if r.status_code != 200:
             logger.warning("Ollama API returned %d — local model offloading disabled", r.status_code)
-            return
+            return False
 
         models = [m.get("name", "") for m in r.json().get("models", [])]
         expected = config.OLLAMA_DEFAULT_MODEL
 
         if expected in models:
             logger.info("Ollama model '%s' available (%d models total)", expected, len(models))
+            return True
         else:
             # Check if base name matches (e.g. "llama3.1:8b" vs "llama3.1:latest")
             base = expected.split(":")[0]
@@ -115,10 +119,13 @@ def _check_ollama_model():
                     "Ollama calls will fall back to Claude.",
                     expected, ", ".join(models[:5]) or "(none)",
                 )
+            return False
     except requests.ConnectionError:
         logger.info("Ollama not running at %s — local model offloading disabled", config.OLLAMA_BASE_URL)
+        return False
     except Exception as e:
         logger.warning("Ollama startup check failed: %s", e)
+        return False
 
 
 def main():
@@ -168,7 +175,22 @@ def main():
     asyncio.set_event_loop(loop)
 
     # Validate Ollama model availability (non-blocking — just logs a warning)
-    _check_ollama_model()
+    ollama_ok = _check_ollama_model()
+
+    # Smoke-test Ollama inference if model is available
+    if ollama_ok:
+        try:
+            from tools.model_router import _call_ollama
+            test = _call_ollama(
+                "Classify: 'hello world'", system="Reply with ONE word: code",
+                model=config.OLLAMA_DEFAULT_MODEL, max_tokens=10,
+            )
+            if test.strip():
+                logger.info("Ollama inference OK: %s", test.strip()[:30])
+            else:
+                logger.warning("Ollama inference returned empty")
+        except Exception as e:
+            logger.warning("Ollama inference test failed: %s", e)
 
     # Load project registry
     projects = load_projects()

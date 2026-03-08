@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import time
 
 import requests
 
@@ -36,16 +37,21 @@ def route_and_call(
     logger.info("Routed %s (complexity=%s) to %s/%s", purpose, complexity, provider, model)
 
     if provider == "ollama":
-        try:
-            result = _call_ollama(prompt, system, model, max_tokens)
-            if not result.strip():
-                logger.warning("Ollama returned empty response, falling back to Claude")
-                provider, model = "claude", config.DEFAULT_MODEL
-            else:
-                return result
-        except Exception as e:
-            logger.warning("Ollama call failed, falling back to Claude: %s", e)
-            provider, model = "claude", config.DEFAULT_MODEL
+        for attempt in range(2):
+            try:
+                result = _call_ollama(prompt, system, model, max_tokens)
+                if result.strip():
+                    return result
+                logger.warning(
+                    "Ollama empty response (attempt %d/2), %s",
+                    attempt + 1, "retrying" if attempt == 0 else "falling back to Claude",
+                )
+                if attempt == 0:
+                    time.sleep(2)
+            except Exception as e:
+                logger.warning("Ollama failed: %s, falling back to Claude", e)
+                break
+        provider, model = "claude", config.DEFAULT_MODEL
 
     # Claude path
     return claude_client.call(

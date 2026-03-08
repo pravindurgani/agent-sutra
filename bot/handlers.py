@@ -845,6 +845,32 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         last_edit_hash = 0
         while not task_future.done():
             await asyncio.sleep(3)
+
+            # Timeout progress feedback
+            elapsed = _time.monotonic() - now_ts
+
+            # Progress update at 5 minutes
+            if elapsed > 300 and not context.user_data.get(f"_progress_{task_id}"):
+                context.user_data[f"_progress_{task_id}"] = True
+                try:
+                    stage = get_stage(task_id)
+                    await status_msg.edit_text(
+                        f"Still working... ({STAGE_LABELS.get(stage, stage)}, {int(elapsed)}s)"
+                    )
+                    last_edit_hash = 0  # Reset so normal updates resume
+                except Exception:
+                    pass
+
+            # Warning at 80% of timeout
+            if elapsed > config.LONG_TIMEOUT * 0.8 and not context.user_data.get(f"_warn_{task_id}"):
+                context.user_data[f"_warn_{task_id}"] = True
+                remaining = config.LONG_TIMEOUT - int(elapsed)
+                try:
+                    await status_msg.edit_text(f"Taking longer than expected. Timeout in {remaining}s.")
+                    last_edit_hash = 0
+                except Exception:
+                    pass
+
             stage = get_stage(task_id)
             if not stage:
                 continue
@@ -961,6 +987,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     finally:
         running_tasks = context.user_data.get("running_tasks", {})
         running_tasks.pop(task_id, None)
+        # Clean up progress feedback flags
+        context.user_data.pop(f"_progress_{task_id}", None)
+        context.user_data.pop(f"_warn_{task_id}", None)
         # Only clear pending_files that were consumed by THIS task.
         # If user uploaded new files while this task was running, preserve them.
         consumed_files = set(context.user_data.pop("_consumed_files_" + task_id, []))
@@ -1114,23 +1143,29 @@ async def cmd_chain(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        # STRICT-AND GATE: exit-code based + audit verdict
+        # STRICT-AND GATE: exit-code based + security block + audit verdict
         # Check execution_result for non-zero exit code first — Claude can't fake this.
+        # Check for BLOCKED: prefix — security scanner refusals.
         # Then check audit_verdict as secondary gate.
         exec_result = result.get("execution_result", "")
         exec_failed = exec_result.startswith("Execution: FAILED")
+        exec_blocked = "BLOCKED:" in exec_result
 
-        if exec_failed or result.get("audit_verdict") != "pass":
-            if exec_failed:
+        if exec_failed or exec_blocked or result.get("audit_verdict") != "pass":
+            if exec_blocked:
+                label = "Step refused"
+                reason = "Security policy blocked this step"
+            elif exec_failed:
+                label = "Step failed"
                 reason = "Execution returned non-zero exit code"
             else:
+                label = "Step failed"
                 reason = result.get("audit_feedback", "Unknown")[:300]
             await update.message.reply_text(
                 f"Chain halted at step {i+1}/{len(steps)}.\n\n"
-                f"Step failed: {step_msg[:100]}\n"
+                f"{label}: {step_msg[:100]}\n"
                 f"Reason: {reason}\n\n"
-                f"Steps {i+2}-{len(steps)} were NOT executed.\n"
-                f"No artifacts from this step were forwarded."
+                f"Steps {i+2}-{len(steps)} were NOT executed."
             )
             return
 

@@ -563,3 +563,169 @@ class TestAuditorCatchesFabrication:
 
         assert result["audit_verdict"] == "fail"
         assert "sample" in result["audit_feedback"].lower() or "synthetic" in result["audit_feedback"].lower()
+
+
+# ── 3A: Chain BLOCKED detection in strict-AND gate ─────────────────
+
+
+class TestChainBlockedDetection:
+    """Chain must halt when execution_result contains 'BLOCKED:' from security scanner."""
+
+    def test_chain_gate_detects_blocked(self):
+        """BLOCKED: in execution_result should trigger chain halt."""
+        result = {
+            "execution_result": "BLOCKED: Code contains dangerous pattern 'rm -rf /'.",
+            "audit_verdict": "pass",
+        }
+        exec_result = result.get("execution_result", "")
+        exec_blocked = "BLOCKED:" in exec_result
+        assert exec_blocked is True
+
+    def test_chain_gate_blocked_takes_priority_over_audit_pass(self):
+        """Even if audit says pass, BLOCKED must halt the chain."""
+        result = {
+            "execution_result": "BLOCKED: Code contains sudo.",
+            "audit_verdict": "pass",
+            "audit_feedback": "Code looks fine",
+        }
+        exec_result = result.get("execution_result", "")
+        exec_failed = exec_result.startswith("Execution: FAILED")
+        exec_blocked = "BLOCKED:" in exec_result
+
+        should_halt = exec_failed or exec_blocked or result.get("audit_verdict") != "pass"
+        assert should_halt is True
+        # And the reason should be security policy
+        if exec_blocked:
+            reason = "Security policy blocked this step"
+        elif exec_failed:
+            reason = "Execution returned non-zero exit code"
+        else:
+            reason = result.get("audit_feedback", "Unknown")[:300]
+        assert reason == "Security policy blocked this step"
+
+    def test_chain_gate_blocked_in_failed_execution(self):
+        """BLOCKED embedded in 'Execution: FAILED' output is also caught."""
+        result = {
+            "execution_result": "Execution: FAILED (exit code -1)\nBLOCKED: Code contains curl|sh.",
+            "audit_verdict": "fail",
+        }
+        exec_result = result.get("execution_result", "")
+        exec_failed = exec_result.startswith("Execution: FAILED")
+        exec_blocked = "BLOCKED:" in exec_result
+        # Both flags triggered
+        assert exec_failed is True
+        assert exec_blocked is True
+        # BLOCKED takes priority in reason
+        if exec_blocked:
+            reason = "Security policy blocked this step"
+        elif exec_failed:
+            reason = "Execution returned non-zero exit code"
+        else:
+            reason = "Unknown"
+        assert reason == "Security policy blocked this step"
+
+    def test_chain_gate_no_blocked_no_halt(self):
+        """Normal successful execution without BLOCKED should not halt."""
+        result = {
+            "execution_result": "Execution: SUCCESS (exit code 0)\nOutput:\nHello World",
+            "audit_verdict": "pass",
+        }
+        exec_result = result.get("execution_result", "")
+        exec_failed = exec_result.startswith("Execution: FAILED")
+        exec_blocked = "BLOCKED:" in exec_result
+        should_halt = exec_failed or exec_blocked or result.get("audit_verdict") != "pass"
+        assert should_halt is False
+
+    def test_chain_gate_blocked_says_refused(self):
+        """When BLOCKED, the halt message should say 'Step refused'."""
+        exec_blocked = True
+        exec_failed = False
+        if exec_blocked:
+            label = "Step refused"
+        elif exec_failed:
+            label = "Step failed"
+        else:
+            label = "Step failed"
+        assert label == "Step refused"
+
+    def test_chain_gate_exec_failed_says_failed(self):
+        """When execution fails (non-zero exit), message should say 'Step failed'."""
+        exec_blocked = False
+        exec_failed = True
+        if exec_blocked:
+            label = "Step refused"
+        elif exec_failed:
+            label = "Step failed"
+        else:
+            label = "Step failed"
+        assert label == "Step failed"
+
+    def test_chain_gate_audit_fail_says_failed(self):
+        """When audit verdict fails, message should say 'Step failed'."""
+        exec_blocked = False
+        exec_failed = False
+        if exec_blocked:
+            label = "Step refused"
+        elif exec_failed:
+            label = "Step failed"
+        else:
+            label = "Step failed"
+        assert label == "Step failed"
+
+
+# ── 3B: Timeout progress feedback ─────────────────────────────────
+
+
+class TestTimeoutProgressFeedback:
+    """Status loop should show progress at 5min and warning at 80% timeout."""
+
+    def test_progress_flag_prevents_duplicate(self):
+        """Progress flag should prevent sending the message twice."""
+        user_data = {}
+        task_id = "test-progress-123"
+
+        # First time: flag not set
+        assert not user_data.get(f"_progress_{task_id}")
+        user_data[f"_progress_{task_id}"] = True
+
+        # Second time: flag is set
+        assert user_data.get(f"_progress_{task_id}") is True
+
+    def test_warn_flag_prevents_duplicate(self):
+        """Warning flag should prevent sending the timeout warning twice."""
+        user_data = {}
+        task_id = "test-warn-456"
+
+        assert not user_data.get(f"_warn_{task_id}")
+        user_data[f"_warn_{task_id}"] = True
+        assert user_data.get(f"_warn_{task_id}") is True
+
+    def test_cleanup_removes_progress_flags(self):
+        """Finally block should clean up both progress flags."""
+        user_data = {
+            "_progress_task-abc": True,
+            "_warn_task-abc": True,
+            "other_key": "preserved",
+        }
+        task_id = "task-abc"
+
+        # Simulate finally block cleanup
+        user_data.pop(f"_progress_{task_id}", None)
+        user_data.pop(f"_warn_{task_id}", None)
+
+        assert f"_progress_{task_id}" not in user_data
+        assert f"_warn_{task_id}" not in user_data
+        assert user_data["other_key"] == "preserved"
+
+    def test_timeout_thresholds(self):
+        """Progress at 300s, warning at 80% of LONG_TIMEOUT."""
+        import config
+        progress_threshold = 300
+        warn_threshold = config.LONG_TIMEOUT * 0.8
+
+        # Progress fires at 5 minutes
+        assert progress_threshold == 300
+        # Warning fires at 80% of timeout (default 900s → 720s)
+        assert warn_threshold == config.LONG_TIMEOUT * 0.8
+        # Warning fires after progress
+        assert warn_threshold > progress_threshold

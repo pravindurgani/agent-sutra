@@ -329,7 +329,7 @@ class TestTruncationTriggersRetry:
             "audit_feedback": "",
             "code": "",
         }
-        result = _execute_code(state)
+        _execute_code(state)
 
         # Should have called claude twice: original + shorter version
         assert mock_claude.call.call_count == 2

@@ -11,17 +11,14 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-import time
 
 import requests
 
 import config
 from tools import claude_client
+from tools.claude_client import MODEL_COSTS as _MODEL_COSTS
 
 logger = logging.getLogger(__name__)
-
-# ── Cost lookup (imported from claude_client to avoid duplication) ────
-from tools.claude_client import MODEL_COSTS as _MODEL_COSTS
 
 
 def route_and_call(

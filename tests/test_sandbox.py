@@ -19,9 +19,6 @@ from tools.sandbox import (
     _walk_artifacts,
     _extract_paths_from_stdout,
     _apply_artifact_sanity_check,
-    _EXCLUDED_DIR_NAMES,
-    _EXCLUDED_FILENAMES,
-    _EXCLUDED_EXTENSIONS,
     _PIP_NAME_MAP,
 )
 from pathlib import Path
@@ -1216,7 +1213,7 @@ class TestServerManagement:
 
     def test_start_server_registers_process(self, tmp_path):
         """start_server registers the process and returns URL + port."""
-        from tools.sandbox import start_server, _running_servers, stop_server
+        from tools.sandbox import start_server, stop_server
         from unittest.mock import patch, MagicMock
 
         mock_popen = MagicMock()

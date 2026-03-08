@@ -443,7 +443,6 @@ class TestScheduledTaskTimeout:
     @pytest.mark.asyncio
     async def test_scheduled_task_times_out(self):
         """Scheduled task exceeding LONG_TIMEOUT is killed and marked failed."""
-        import asyncio as _asyncio
         from bot.handlers import _scheduled_task_run
 
         with patch("bot.handlers.db") as mock_db, \

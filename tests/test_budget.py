@@ -5,16 +5,14 @@ import sys
 import os
 import sqlite3
 import time
-import tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from tools.claude_client import (
     BudgetExceededError, _check_budget, MODEL_COSTS,
-    _init_usage_db, _persist_usage, get_usage_summary, get_cost_summary,
+    _persist_usage, get_usage_summary, get_cost_summary,
 )
 import config
-from unittest.mock import patch
 
 
 class TestBudgetEnforcement:

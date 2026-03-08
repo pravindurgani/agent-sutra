@@ -507,7 +507,9 @@ If daily budget is set ($10), run tasks until >$8 (80%) spent. Then send any tas
 ```
 What time is it in London right now?
 ```
-**Watch for:** Starting message includes "(budget >80% — routing classify/plan to local model)". Check logs for Ollama escalation.
+**Watch for:** Starting message includes a budget warning (e.g., "Daily budget >80% used"). This is a **user-facing warning only** — it does NOT force Ollama routing at 80%. The pre-existing 70% budget escalation in `model_router.py` handles Ollama routing independently (routes classify/plan to local model when spend exceeds 70% of daily budget). Check logs: Ollama escalation may already be active if >70% spent.
+
+**Reveals:** The two-tier budget system: 70% triggers automatic Ollama routing (invisible to user), 80% triggers a visible warning message. These are independent mechanisms.
 
 ### Test 9.3 — RAM Guard
 ```
@@ -877,3 +879,45 @@ After understanding why a task failed (via /status), use `/retry` — preserves 
 - **Multi-file code generation** — Currently everything is single-file. For real projects, generating a module with 3-4 files (model, service, test, config) would be more natural.
 - **Incremental context building** — Instead of conversation history that decays, build per-project context files that accumulate architectural understanding. A living ARCHITECTURE.md per project that the agent reads and updates.
 - **Cost-aware routing at task level** — Before planning, estimate complexity and route accordingly. Simple tasks (run a command, fetch data) don't need Opus audit at all.
+
+---
+
+## Appendix: v8.6.0 Implementation Audit
+
+Based on the 15-item `AgentSutra_Improvements_Report.md` and 6-phase `IMPLEMENTATION_PLAN.md`, this audit tracks what was actually implemented, what was deferred, and where the implementation deviated from the plan.
+
+### Implemented (13/15)
+
+| # | Item | Phase | Status | Notes |
+|---|------|-------|--------|-------|
+| 1A | Temporal window 30min→2hr | 1 | Done | `deliverer.py` — `0.0208` → `0.0833` in `_suggest_next_step()` SQL |
+| 1B | Justfile | 1 | Done | 6 recipes: test, test-quick, test-security, lint, format, run |
+| 1C | Session log rotation | 1 | Done | `SESSION_LOG.md` with append-only format |
+| 2A | Pre-commit hooks | 2 | Done | `.pre-commit-config.yaml` — ruff lint/format, large files, private keys, YAML |
+| 2B | GitHub Actions CI | 2 | Done | `.github/workflows/ci.yml` — Python 3.11, ruff, pytest (non-Docker) |
+| 2C | Enhanced Claude commands | 2 | Done | 4 commands in `.claude/commands/` updated with workflow steps |
+| 3A | Cost analytics | 3 | Done | `get_daily_cost_breakdown(days=7)` + `get_budget_remaining()` in `claude_client.py`, `/cost` handler |
+| 3B | Partial result preservation | 3 | Done | `task_state` JSON + `last_completed_stage` columns in tasks table, persisted after each node |
+| 3C | Stage timing exposure | 3 | Done | Collected in `_wrap_node()`, stored inside `task_state` JSON, shown in `/status` and `/health` |
+| 3D | Launchd service | 3 | Done | `scripts/com.agentsutra.bot.plist` + `scripts/install_service.sh` |
+| 3E | `/retry` command | 3 | Done | Re-runs failed task with same message, streams status, delivers artifacts |
+| 3F | `/setup` command | 3 | Done | 6 checks: env vars, Ollama, projects, DB, budget, workspace |
+| 5A | Budget warning | 5 | Partial | User-facing warning at >80% only. See Deviation 1 below. |
+
+### Not Implemented (2/15)
+
+| # | Item | Phase | Reason |
+|---|------|-------|--------|
+| 4A | RAG context layer | 4 | 2-day effort, deferred to dedicated session. LanceDB + nomic-embed-text via Ollama. Highest-impact remaining improvement. |
+| 6A | HTTP health endpoint | 6 | Optional, depends on launchd deployment. No `/health` HTTP route — the existing `/health` Telegram command suffices for now. |
+
+### Deviations from Plan (3)
+
+**Deviation 1: Budget degradation (5A)**
+Plan recommended adding `get_budget_utilization()` and forcing Ollama routing at 80% in `model_router.py`. Instead, only a user-facing warning was added at >80% in `handle_message()`. The pre-existing 70% budget escalation in `model_router.py` already routes classify/plan to Ollama, so the net effect is similar — Ollama kicks in at 70%, user sees a warning at 80%. No model_router changes were needed.
+
+**Deviation 2: Stage timings storage (3C)**
+Plan specified a dedicated `stage_timings` column. Instead, timings are stored inside the `task_state` JSON blob (which already captures all pipeline state). This is simpler — one JSON column instead of two — and `/status` parses `task_state` to display timings. No functionality lost.
+
+**Deviation 3: Justfile missing `cost` recipe (1B)**
+Plan included a `just cost` recipe for quick cost checks. The Justfile has 6 recipes (test, test-quick, test-security, lint, format, run) but no `cost`. Cost checking is done via `/cost` in Telegram, which is the natural interface. Low impact.

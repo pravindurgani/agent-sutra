@@ -9,7 +9,6 @@ Covers:
 """
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 
@@ -55,7 +54,6 @@ class TestCheckPageNoPlaywright:
         import sys
         with patch.dict(sys.modules, {"playwright": None, "playwright.sync_api": None}):
             # Force reimport
-            import importlib
             import tools.visual_check as vc_mod
             # Patch the import inside check_page
             with patch("builtins.__import__", side_effect=ImportError("No module named 'playwright'")):

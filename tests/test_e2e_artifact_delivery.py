@@ -21,7 +21,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import config
-from tools.sandbox import run_code, run_shell, _is_artifact_file
+from tools.sandbox import run_code
 
 
 def _make_project_dir():

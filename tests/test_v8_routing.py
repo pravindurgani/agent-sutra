@@ -8,9 +8,8 @@ Covers:
 from __future__ import annotations
 
 import sqlite3
-import time
 from datetime import datetime, timezone, timedelta
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 

@@ -578,7 +578,7 @@ async def cmd_cost(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if daily:
         today = daily[0] if daily else None
         if today and today.get("by_model"):
-            lines.append(f"\nBy Model (Today)")
+            lines.append("\nBy Model (Today)")
             total_today = today["cost_usd"] or 1
             for model, model_cost in sorted(today["by_model"].items(), key=lambda x: x[1], reverse=True):
                 pct = (model_cost / total_today * 100) if total_today > 0 else 0
@@ -808,7 +808,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if budget.get("daily_limit") and budget.get("daily_spent"):
             utilization = budget["daily_spent"] / budget["daily_limit"]
             if utilization > 0.8:
-                budget_warning = f" (budget >80% — routing classify/plan to local model)"
+                budget_warning = " (budget >80% — routing classify/plan to local model)"
     except Exception:
         pass
 

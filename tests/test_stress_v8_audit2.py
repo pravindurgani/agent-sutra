@@ -12,20 +12,16 @@ Phases:
 """
 from __future__ import annotations
 
-import asyncio
 import datetime
 import json
 import os
 import re
-import shutil
 import sqlite3
-import sys
 import threading
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from unittest.mock import patch, MagicMock, PropertyMock
+from unittest.mock import patch, MagicMock
 
 import pytest
 
@@ -312,7 +308,7 @@ class TestPhase1_PathTraversalDeep:
         )
 
     @pytest.mark.skipif(
-        not os.environ.get("DOCKER_ENABLED", "").lower() in ("true", "1"),
+        os.environ.get("DOCKER_ENABLED", "").lower() not in ("true", "1"),
         reason="Docker not enabled — skip Docker volume escape test",
     )
     def test_vector_c_docker_volume_escape(self, tmp_path):
@@ -498,7 +494,7 @@ class TestPhase2_OutputRegistryUUIDUniqueness:
         """Verify the 50-line bound is enforced."""
         from tools.sandbox import (
             _register_live_output, _append_live_output,
-            get_live_output, _clear_live_output, _live_output,
+            _clear_live_output, _live_output,
         )
 
         _register_live_output("bound-test")

@@ -5,18 +5,13 @@ Covers all 4 phases of the stress-test specification.
 """
 from __future__ import annotations
 
-import hashlib
 import json
-import os
-import re
 import sqlite3
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-import pytest
 
 import config
 
@@ -263,7 +258,6 @@ class TestDockerPathTraversal:
 
     def test_dotfile_gets_prefix(self):
         """.env filename should be prefixed with upload_."""
-        from tools.file_manager import save_upload
         # save_upload adds 'upload_' prefix for dotfiles
         # Just test the sanitization logic
         filename = ".env"
@@ -308,7 +302,7 @@ class TestSyncLockDeadlock:
 
     def test_concurrent_writes_no_deadlock(self, tmp_path):
         """3 concurrent threads writing project memories — must not deadlock."""
-        from storage.db import sync_write_project_memory, _sync_db_lock
+        from storage.db import sync_write_project_memory
 
         db_path = tmp_path / "test_concurrent.db"
         # Create the table first
@@ -327,7 +321,6 @@ class TestSyncLockDeadlock:
         conn.close()
 
         errors = []
-        completed = threading.Event()
 
         def writer(thread_id: int):
             try:
@@ -351,7 +344,7 @@ class TestSyncLockDeadlock:
 
         # Verify no threads are still running (deadlock indicator)
         for t in threads:
-            assert not t.is_alive(), f"Thread deadlocked (still alive after 15s)"
+            assert not t.is_alive(), "Thread deadlocked (still alive after 15s)"
 
         assert len(errors) == 0, f"Concurrent writes produced errors: {errors}"
 

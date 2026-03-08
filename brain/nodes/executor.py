@@ -630,7 +630,7 @@ def _execute_html_generation(
         from tools.sandbox import start_server
         serve_dir = output_path.parent
         url, port = start_server(
-            f"python3 -m http.server {{port}}",
+            "python3 -m http.server {port}",
             working_dir=serve_dir,
             task_id=state["task_id"],
         )

@@ -7,7 +7,6 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import config
-from pathlib import Path
 from unittest.mock import patch
 from brain.nodes.executor import (
     _strip_markdown_blocks, _estimate_timeout, _extract_params,

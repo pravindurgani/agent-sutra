@@ -5,7 +5,6 @@ import re
 import logging
 
 from brain.state import AgentState
-from tools import claude_client
 from tools.model_router import route_and_call
 from tools.projects import match_project, get_all_projects_summary
 

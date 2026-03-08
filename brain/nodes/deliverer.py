@@ -291,9 +291,9 @@ def _extract_output(execution_result: str) -> str:
 def _describe_code(code: str) -> str:
     """Create a brief description of what the code does (without including the code)."""
     lines = code.strip().split("\n")
-    imports = [l.strip() for l in lines if l.strip().startswith(("import ", "from "))]
-    asserts = sum(1 for l in lines if "assert " in l)
-    functions = [l.strip() for l in lines if l.strip().startswith("def ")]
+    imports = [ln.strip() for ln in lines if ln.strip().startswith(("import ", "from "))]
+    asserts = sum(1 for ln in lines if "assert " in ln)
+    functions = [ln.strip() for ln in lines if ln.strip().startswith("def ")]
 
     parts = []
     if imports:
@@ -363,7 +363,7 @@ def _fallback_response(state: AgentState, artifacts: list[str]) -> str:
     output = _extract_output(execution_result)
     if output and output != "(no output)":
         # Show last meaningful lines
-        lines = [l for l in output.strip().split("\n") if l.strip()]
+        lines = [ln for ln in output.strip().split("\n") if ln.strip()]
         if len(lines) > 15:
             parts.append("Key output:\n" + "\n".join(lines[-15:]))
         else:

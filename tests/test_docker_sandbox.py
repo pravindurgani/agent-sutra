@@ -22,9 +22,7 @@ from tools.sandbox import (
     _docker_available,
     _docker_status,
     _build_docker_cmd,
-    _docker_pip_install,
     run_code,
-    run_code_with_auto_install,
     ExecutionResult,
 )
 

@@ -921,18 +921,19 @@ class TestBudgetEscalation:
     """Phase 4.3: Test budget-driven routing escalation."""
 
     def test_budget_escalation_at_70_percent(self):
-        """When daily spend > 70% of budget, classify should route to Ollama."""
+        """When daily spend > 70% of budget, low-complexity classify routes to Ollama."""
         from tools.model_router import _select_model
 
         with patch("tools.model_router._ollama_available", return_value=True), \
+             patch("tools.model_router._ram_below_threshold", return_value=True), \
              patch("tools.model_router._daily_spend_exceeds_threshold") as mock_budget:
 
-            # At 71% — should escalate
+            # At 71% — should escalate for low complexity
             mock_budget.return_value = True
 
-            provider, model = _select_model("classify", "high")
+            provider, model = _select_model("classify", "low")
             assert provider == "ollama", (
-                "Should escalate to Ollama when budget threshold exceeded"
+                "Should escalate to Ollama when budget threshold exceeded (low complexity)"
             )
 
     def test_no_budget_set_never_escalates(self):

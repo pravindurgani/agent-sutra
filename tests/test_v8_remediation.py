@@ -1112,7 +1112,7 @@ class TestLegacyFileSelectorFallback:
     @patch.object(config, "RAG_ENABLED", False)
     @patch("brain.nodes.planner.claude_client")
     def test_invalid_json_returns_base(self, mock_claude):
-        """Invalid JSON response → returns base prompt unmodified."""
+        """Invalid JSON response → retries once then returns base prompt unmodified."""
         import tempfile
         mock_claude.call.return_value = "not json at all"
         from brain.nodes.planner import _inject_project_files
@@ -1128,7 +1128,7 @@ class TestLegacyFileSelectorFallback:
                 "project_name": "test-proj",
             }
             result = _inject_project_files(state, "base prompt")
-            assert mock_claude.call.call_count == 1
+            assert mock_claude.call.call_count == 2  # Retries once on parse failure
             assert result == "base prompt"
 
 

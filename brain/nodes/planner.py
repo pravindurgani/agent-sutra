@@ -354,16 +354,28 @@ def _inject_project_files(state: AgentState, system: str) -> str:
         f"Project file tree:\n{tree_listing}"
     )
 
-    try:
-        selection = claude_client.call(
-            selector_prompt, system=_FILE_SELECTOR_SYSTEM,
-            max_tokens=300, temperature=0.0,
-        )
-        selected = json.loads(selection)
-        if not isinstance(selected, list):
-            raise ValueError("Expected a JSON list")
-    except (json.JSONDecodeError, ValueError, Exception) as e:
-        logger.warning("File selector failed: %s", e)
+    selected = None
+    for attempt in range(2):
+        try:
+            selection = claude_client.call(
+                selector_prompt, system=_FILE_SELECTOR_SYSTEM,
+                max_tokens=300, temperature=0.0,
+            )
+            parsed = json.loads(selection)
+            if isinstance(parsed, list):
+                selected = parsed
+                break
+            logger.warning("File selector returned non-list: %s", type(parsed).__name__)
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.warning(
+                "File selector parse failure (attempt %d/2): %s — raw: %.100s",
+                attempt + 1, e, selection if "selection" in dir() else "<no response>",
+            )
+        except Exception as e:
+            logger.warning("File selector failed: %s", e)
+            break  # Don't retry on non-parse errors (API errors, etc.)
+
+    if selected is None:
         return system
 
     resolved_root = project_path.resolve()

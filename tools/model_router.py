@@ -77,7 +77,7 @@ def _select_model(purpose: str, complexity: str) -> tuple[str, str]:
 
     # Rule (d): Budget escalation — check before complexity routing
     # Also check RAM: don't route to Ollama under critical memory pressure
-    if purpose in ("classify", "plan") and _daily_spend_exceeds_threshold(0.7):
+    if purpose in ("classify", "plan") and complexity != "high" and _daily_spend_exceeds_threshold(0.7):
         if _ollama_available() and _ram_below_threshold(90):
             return ("ollama", config.OLLAMA_DEFAULT_MODEL)
 
@@ -178,10 +178,16 @@ def _call_ollama(prompt: str, system: str, model: str, max_tokens: int) -> str:
             timeout=120,
         )
         response.raise_for_status()
-        content = response.json().get("message", {}).get("content", "")
+        raw_content = response.json().get("message", {}).get("content", "")
+        content = raw_content
         # Strip reasoning model thinking blocks (e.g. DeepSeek R1)
         if "<think>" in content and "</think>" in content:
             content = content.split("</think>", 1)[-1].strip()
+        # Handle unclosed think block (model produced only reasoning, no answer)
+        elif "<think>" in content and "</think>" not in content:
+            content = ""  # Incomplete thinking — treat as empty for retry
+        if not content:
+            logger.warning("Ollama returned empty content (raw length: %d)", len(raw_content))
         return content
     except requests.HTTPError as e:
         if e.response is not None and e.response.status_code == 404:
@@ -210,4 +216,7 @@ def _call_ollama_generate(prompt: str, system: str, model: str, max_tokens: int)
     # Strip reasoning model thinking blocks (e.g. DeepSeek R1)
     if "<think>" in content and "</think>" in content:
         content = content.split("</think>", 1)[-1].strip()
+    # Handle unclosed think block (model produced only reasoning, no answer)
+    elif "<think>" in content and "</think>" not in content:
+        content = ""  # Incomplete thinking — treat as empty for retry
     return content

@@ -116,13 +116,13 @@ class TestModelRouterSelection:
         assert model == config.DEFAULT_MODEL
 
     def test_budget_escalation_routes_to_ollama(self):
-        """Rule (d): daily spend > 70% of budget → classify routes to Ollama."""
+        """Rule (d): daily spend > 70% of budget, low complexity → routes to Ollama."""
         from tools.model_router import _select_model
 
         with patch("tools.model_router._daily_spend_exceeds_threshold", return_value=True), \
              patch("tools.model_router._ollama_available", return_value=True), \
              patch("tools.model_router._ram_below_threshold", return_value=True):
-            provider, model = _select_model("classify", "high")
+            provider, model = _select_model("classify", "low")
 
         assert provider == "ollama"
         assert model == config.OLLAMA_DEFAULT_MODEL

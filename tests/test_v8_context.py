@@ -349,3 +349,42 @@ class TestDynamicFileInjection:
         # Secret file must NOT be injected
         assert "API_KEY=leaked" not in result
         assert "secret.env" not in result
+
+    @patch.object(config, "RAG_ENABLED", False)
+    def test_file_selector_retries_on_parse_failure(self, tmp_path):
+        """File selector retries once on JSON parse failure, succeeds on second attempt."""
+        (tmp_path / "file.py").write_text("code here")
+        state = {
+            "task_type": "project",
+            "project_name": "testproj",
+            "project_config": {"path": str(tmp_path)},
+            "message": "Run tests",
+        }
+
+        # First call returns garbage, second returns valid JSON
+        with patch("tools.claude_client.call", side_effect=["not json", '["file.py"]']):
+            from brain.nodes.planner import _inject_project_files
+            result = _inject_project_files(state, "BASE SYSTEM")
+
+        assert "RELEVANT CODE FROM TESTPROJ" in result
+        assert "code here" in result
+
+    @patch.object(config, "RAG_ENABLED", False)
+    def test_file_selector_logs_raw_response_on_failure(self, tmp_path, caplog):
+        """File selector logs the raw response when it can't parse JSON."""
+        (tmp_path / "file.py").write_text("code")
+        state = {
+            "task_type": "project",
+            "project_name": "testproj",
+            "project_config": {"path": str(tmp_path)},
+            "message": "Run tests",
+        }
+
+        with patch("tools.claude_client.call", return_value="I cannot parse this"):
+            import logging
+            with caplog.at_level(logging.WARNING, logger="brain.nodes.planner"):
+                from brain.nodes.planner import _inject_project_files
+                result = _inject_project_files(state, "BASE SYSTEM")
+
+        assert result == "BASE SYSTEM"  # Falls back gracefully
+        assert any("parse failure" in r.message.lower() for r in caplog.records)

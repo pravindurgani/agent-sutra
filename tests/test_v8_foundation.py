@@ -193,8 +193,9 @@ class TestCodingStandardsInjection:
             elif standards_file.exists():
                 standards_file.unlink()
 
+    @patch("tools.model_router._ollama_available", return_value=False)
     @patch("brain.nodes.planner.claude_client.call")
-    def test_standards_truncated_at_2000_chars(self, mock_call):
+    def test_standards_truncated_at_2000_chars(self, mock_call, _mock_ollama):
         """Standards content longer than 2000 chars should be truncated."""
         mock_call.return_value = "1. Do the thing"
 

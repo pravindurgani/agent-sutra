@@ -202,7 +202,8 @@ class TestPlannerMemoryInjection:
             "message": "Generate report for Kambi",
         }
 
-        with patch("tools.claude_client.call", return_value="1. Run report") as mock_call:
+        with patch("tools.claude_client.call", return_value="1. Run report") as mock_call, \
+             patch("tools.model_router._ollama_available", return_value=False):
             from brain.nodes.planner import plan
             plan(state)
             _, kwargs = mock_call.call_args

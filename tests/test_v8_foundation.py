@@ -164,8 +164,9 @@ class TestCodingStandardsInjection:
             elif standards_file.exists():
                 standards_file.unlink()
 
+    @patch("tools.model_router._ollama_available", return_value=False)
     @patch("brain.nodes.planner.claude_client.call")
-    def test_standards_not_injected_for_project_task(self, mock_call):
+    def test_standards_not_injected_for_project_task(self, mock_call, _mock_ollama):
         """A 'project' task should NOT include standards (runs existing commands)."""
         mock_call.return_value = "1. Run the command"
 

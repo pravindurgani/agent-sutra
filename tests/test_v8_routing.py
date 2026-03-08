@@ -120,7 +120,8 @@ class TestModelRouterSelection:
         from tools.model_router import _select_model
 
         with patch("tools.model_router._daily_spend_exceeds_threshold", return_value=True), \
-             patch("tools.model_router._ollama_available", return_value=True):
+             patch("tools.model_router._ollama_available", return_value=True), \
+             patch("tools.model_router._ram_below_threshold", return_value=True):
             provider, model = _select_model("classify", "high")
 
         assert provider == "ollama"

@@ -26,14 +26,13 @@ if [ -z "$PYTHON_BIN" ] || [ ! -x "$PYTHON_BIN" ]; then
     PYTHON_BIN="$(which python3)"
 fi
 
-PYTHON_BIN="$(realpath "$PYTHON_BIN")"
 PYENV_BIN="$(dirname "$PYTHON_BIN")"
 
 echo "Python:  $PYTHON_BIN"
 echo "Project: $PROJECT_DIR"
 
 # Verify python can import the project
-if ! "$PYTHON_BIN" -c "import config" 2>/dev/null; then
+if ! (cd "$PROJECT_DIR" && "$PYTHON_BIN" -c "import config") 2>/dev/null; then
     echo "ERROR: '$PYTHON_BIN' cannot import config.py from $PROJECT_DIR"
     echo "Make sure dependencies are installed in the correct venv."
     exit 1

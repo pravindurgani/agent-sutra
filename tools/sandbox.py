@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import os
 import re
 import shlex
@@ -450,6 +451,45 @@ _CODE_BLOCKED_PATTERNS = [
 ]
 
 
+def _try_fold_value(node: ast.expr) -> str | None:
+    """Extract string value from a constant or nested BinOp."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.BinOp):
+        return _try_fold_concat(node)
+    return None
+
+
+def _try_fold_concat(node: ast.BinOp) -> str | None:
+    """Recursively fold a chain of string additions."""
+    if isinstance(node.op, ast.Add):
+        left = _try_fold_value(node.left)
+        right = _try_fold_value(node.right)
+        if isinstance(left, str) and isinstance(right, str):
+            return left + right
+    return None
+
+
+def _resolve_constant_strings(code: str) -> list[str]:
+    """Parse Python AST and resolve string concatenation.
+
+    Finds BinOp(Constant + Constant) chains. Returns all resolved string values.
+    Does NOT run code — only resolves compile-time constant expressions.
+    """
+    resolved = []
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return []
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            value = _try_fold_concat(node)
+            if value and isinstance(value, str):
+                resolved.append(value)
+    return resolved
+
+
 def _check_code_safety(code: str) -> str | None:
     """Scan Python code content for dangerous operations. Returns error message or None.
 
@@ -479,6 +519,19 @@ def _check_code_safety(code: str) -> str | None:
                 f"BLOCKED: Code contains shell pattern matching "
                 f"'{blocked.pattern}'. Refusing to execute."
             )
+
+    # AST scan: resolve string concatenation and check against blocklists
+    resolved_strings = _resolve_constant_strings(code)
+    for resolved in resolved_strings:
+        for blocked in _BLOCKED_RE:
+            if blocked.search(resolved):
+                return (
+                    f"BLOCKED: Code constructs blocked pattern '{resolved[:60]}' "
+                    f"via string concatenation."
+                )
+        for pattern, label in _CODE_BLOCKED_PATTERNS:
+            if pattern.search(resolved):
+                return f"BLOCKED: Code constructs {label} via string concatenation."
     return None
 
 
@@ -522,6 +575,38 @@ def _check_shell_safety(code: str) -> str | None:
     for pattern in _BLOCKED_RE:
         if pattern.search(code):
             return f"BLOCKED: Shell script contains catastrophic pattern '{pattern.pattern}'."
+    return None
+
+
+def _scan_written_files(working_dir: Path, pre_existing: set[str]) -> str | None:
+    """Scan files written during execution for dangerous content.
+
+    Checks .sh, .bash, .py, .js files that were created during execution.
+    Returns error message if dangerous content found, None otherwise.
+    """
+    dangerous_exts = {".sh", ".bash", ".py", ".js", ".bat", ".cmd", ".ps1"}
+    for f in working_dir.iterdir():
+        if not f.is_file() or str(f) in pre_existing:
+            continue
+        if f.suffix.lower() not in dangerous_exts:
+            continue
+        try:
+            content = f.read_text(errors="replace")[:50_000]
+        except OSError:
+            continue
+
+        if f.suffix.lower() in (".sh", ".bash"):
+            result = _check_shell_safety(content)
+            if result:
+                return f"Generated file '{f.name}' {result}"
+        elif f.suffix.lower() == ".py":
+            result = _check_code_safety(content)
+            if result:
+                return f"Generated file '{f.name}' {result}"
+        elif f.suffix.lower() == ".js":
+            result = _check_js_safety(content)
+            if result:
+                return f"Generated file '{f.name}' {result}"
     return None
 
 

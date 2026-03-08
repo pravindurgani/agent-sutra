@@ -20,6 +20,8 @@ from tools.sandbox import (
     _extract_paths_from_stdout,
     _apply_artifact_sanity_check,
     _PIP_NAME_MAP,
+    _resolve_constant_strings,
+    _scan_written_files,
 )
 from pathlib import Path
 import pytest
@@ -1534,3 +1536,72 @@ class TestJavaScriptSafety:
         code = "const cmd = 'sudo rm -rf /';"
         matches = [p for p in _BLOCKED_RE if p.search(code)]
         assert len(matches) > 0
+
+
+# ── Phase 2: AST constant folding scanner tests ────────────────────
+
+
+class TestASTConstantFolding:
+    """Tests for _resolve_constant_strings and AST-based bypass detection."""
+
+    def test_ast_catches_string_concat_sudo(self):
+        """'su' + 'do' should be resolved and blocked."""
+        code = 'cmd = "su" + "do" + " apt-get install evil"'
+        resolved = _resolve_constant_strings(code)
+        assert any("sudo" in r for r in resolved)
+        result = _check_code_safety(code)
+        assert result is not None
+        assert "string concatenation" in result
+
+    def test_ast_catches_nested_concat(self):
+        """'r' + 'm' + ' -' + 'rf' should be resolved and blocked."""
+        code = 'cmd = "r" + "m" + " -" + "rf" + " /"'
+        resolved = _resolve_constant_strings(code)
+        assert any("rm -rf /" in r for r in resolved)
+        result = _check_code_safety(code)
+        assert result is not None
+        assert "string concatenation" in result
+
+    def test_ast_allows_benign_concat(self):
+        """'hello' + ' world' should not be blocked."""
+        code = 'msg = "hello" + " world"'
+        resolved = _resolve_constant_strings(code)
+        assert any("hello world" in r for r in resolved)
+        result = _check_code_safety(code)
+        assert result is None
+
+    def test_ast_handles_syntax_error(self):
+        """Malformed code should return empty list, not crash."""
+        code = "def broken(:\n    pass"
+        resolved = _resolve_constant_strings(code)
+        assert resolved == []
+
+
+# ── Phase 2: Written file scanning tests ───────────────────────────
+
+
+class TestWrittenFileScanning:
+    """Tests for _scan_written_files post-execution scanner."""
+
+    def test_written_file_scan_catches_sh_sudo(self, tmp_path):
+        """A .sh file with sudo written during execution should be caught."""
+        sh_file = tmp_path / "setup.sh"
+        sh_file.write_text("#!/bin/bash\nsudo apt-get update\n")
+        result = _scan_written_files(tmp_path, set())
+        assert result is not None
+        assert "setup.sh" in result
+
+    def test_written_file_scan_allows_safe_sh(self, tmp_path):
+        """A .sh file with safe content should pass."""
+        sh_file = tmp_path / "hello.sh"
+        sh_file.write_text("#!/bin/bash\necho hello world\n")
+        result = _scan_written_files(tmp_path, set())
+        assert result is None
+
+    def test_written_file_scan_ignores_preexisting(self, tmp_path):
+        """Pre-existing files should be skipped even if dangerous."""
+        sh_file = tmp_path / "old.sh"
+        sh_file.write_text("#!/bin/bash\nsudo rm -rf /\n")
+        pre_existing = {str(sh_file)}
+        result = _scan_written_files(tmp_path, pre_existing)
+        assert result is None

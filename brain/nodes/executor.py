@@ -543,10 +543,30 @@ def _execute_code(state: AgentState) -> dict:
 
     timeout = _estimate_timeout(state)
     working_dir = _determine_working_dir(state)
+
+    # 2B: Snapshot existing files before execution for post-scan
+    effective_dir = working_dir or config.OUTPUTS_DIR
+    pre_existing = {str(f) for f in effective_dir.iterdir() if f.is_file()} if effective_dir.is_dir() else set()
+
     result = run_code_with_auto_install(code, timeout=timeout, working_dir=working_dir, task_id=state["task_id"])
 
+    # 2B: Scan files written during execution for dangerous content
+    if result.success and effective_dir.is_dir():
+        from tools.sandbox import _scan_written_files
+        file_scan = _scan_written_files(effective_dir, pre_existing)
+        if file_scan:
+            logger.warning("Post-execution file scan blocked: %s", file_scan)
+            result = type(result)(
+                stdout=result.stdout,
+                stderr=file_scan,
+                return_code=1,
+                success=False,
+                files_created=result.files_created,
+                auto_installed=result.auto_installed,
+                duration_seconds=result.duration_seconds,
+            )
+
     # Prefer explicitly declared artifacts; fall back to mtime scanning
-    effective_dir = working_dir or config.OUTPUTS_DIR
     declared = _extract_declared_artifacts(result.stdout or "", effective_dir)
     artifacts = declared if declared else result.files_created
 

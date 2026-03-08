@@ -49,7 +49,10 @@ def _run_pipeline(state, mock, max_retries=None):
     """Simulate the graph: classify → plan → execute → audit → (retry or deliver)."""
     retries = max_retries if max_retries is not None else config.MAX_RETRIES
 
-    with patch("tools.claude_client.call", mock):
+    with (
+        patch("tools.claude_client.call", mock),
+        patch("tools.model_router._ollama_available", return_value=False),
+    ):
         state.update(classify(state))
         state.update(plan(state))
         state.update(execute(state))

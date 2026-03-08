@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "echo '' >> CLAUDE.md && echo '<!-- session ended: '$(date '+%Y-%m-%d %H:%M')' -->' >> CLAUDE.md"
+            "command": "echo '' >> SESSION_LOG.md && echo '<!-- session ended: '$(date '+%Y-%m-%d %H:%M')' -->' >> SESSION_LOG.md"
           }
         ]
       }

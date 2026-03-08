@@ -31,3 +31,7 @@ Keep entries concise. Do not delete old entries.
   - Phase 5: Budget warning at >80% utilization
 - **Decisions**: Skipped Phase 4 (RAG — 2-day effort, saved for dedicated session) and Phase 6 (health endpoint — optional, depends on launchd deployment). Budget degradation uses existing 70% Ollama escalation, added 80% user warning.
 - **Next**: RAG context layer (Phase 4), end-to-end testing on Mac Mini, launchd deployment
+
+<!-- session ended: 2026-03-08 17:43 -->
+
+<!-- session ended: 2026-03-08 17:45 -->

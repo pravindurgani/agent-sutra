@@ -876,7 +876,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Update status message to completion
         try:
-            await status_msg.edit_text(f"Completed. (task {task_id[:8]})")
+            await status_msg.edit_text(f"Done. (task {task_id[:8]})")
         except Exception:
             pass
 
@@ -1176,7 +1176,7 @@ async def cmd_deploy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not html_files:
         await update.message.reply_text(
             f"No HTML artifacts found for '{task_id_prefix}'. "
-            "/deploy works with frontend/ui_design outputs."
+            "Make sure the task generated an HTML file."
         )
         return
 

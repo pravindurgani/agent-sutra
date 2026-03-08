@@ -4,7 +4,7 @@ Every folder, file, and configuration in the AgentSutra project — what it is, 
 
 **Generated:** 2026-02-24 (v8.0.0 baseline)
 
-> **Note:** This reference was written at v8.0.0. Versions 8.1.0–8.6.0 added: `tools/deployer.py` (static deployment), `tools/visual_check.py` (Playwright verification), server management in `tools/sandbox.py`, `/deploy`, `/servers`, `/stopserver` commands, `server_url` and `deploy_url` in AgentState, Firebase Hosting support, visual check context in the auditor, Tier 1+ code/script scanning, truncation detection, fabrication detection, chain strict-AND gate, comprehensive third-pass security hardening (37 fixes), partial result preservation (`task_state`/`last_completed_stage` in DB), cost analytics with 7-day breakdown, `/retry` and `/setup` commands, budget >80% warning, temporal window expansion (30min→2hr), Justfile, pre-commit hooks, GitHub Actions CI, and launchd service. See [AGENTSUTRA.md changelog](AGENTSUTRA.md#changelog) for full details.
+> **Note:** This reference was written at v8.0.0. Versions 8.1.0–8.7.0 added: `tools/deployer.py` (static deployment), `tools/visual_check.py` (Playwright verification), `tools/rag.py` (RAG context layer with LanceDB + Ollama embeddings), server management in `tools/sandbox.py`, `/deploy`, `/servers`, `/stopserver`, `/reindex` commands, `server_url` and `deploy_url` in AgentState, Firebase Hosting support, visual check context in the auditor, Tier 1+ code/script scanning, AST constant folding scanner, smart subprocess allowlist, written-file scanning, truncation detection (Python + shell), fabrication detection, chain strict-AND gate with BLOCKED detection, anti-fabrication hardening (file ref validation, credential filter, path sanitisation), comprehensive third-pass security hardening (37 fixes), Ollama stabilisation (empty response retry, startup inference test), partial result preservation (`task_state`/`last_completed_stage` in DB), cost analytics with 7-day breakdown, `/retry` and `/setup` commands, budget >80% warning, temporal window expansion (30min→2hr), Justfile, pre-commit hooks, GitHub Actions CI, and launchd service. See [AGENTSUTRA.md changelog](AGENTSUTRA.md#changelog) for full details.
 
 ---
 
@@ -34,11 +34,11 @@ Every folder, file, and configuration in the AgentSutra project — what it is, 
 
 AgentSutra is a self-hosted Telegram bot that receives natural language tasks, processes them through a 5-stage LangGraph pipeline (Classify → Plan → Execute → Audit → Deliver), and returns results. It runs on a Mac Mini M2 (16GB) for a single authenticated user.
 
-**Key numbers (v8.6.0):**
-- ~7,050 lines of application code across 20 source files
-- ~9,000 lines of test code across 24 test files
-- 661 total tests (625 passing, 36 skipped — Docker required)
-- 18 Telegram commands
+**Key numbers (v8.7.0):**
+- ~7,775 lines of application code across 21 source files
+- ~10,078 lines of test code across 25 test files
+- 737 total tests (726 passing, 11 skipped)
+- 19 Telegram commands
 - 7 task types
 - 39 blocked command patterns (Tier 1 security) + full-text code scanning (Tier 1+) + 51 code scanner patterns (Tier 4/5)
 - 5-stage pipeline with cross-model auditing (Sonnet writes, Opus reviews)
@@ -181,7 +181,7 @@ Package marker. Empty.
 
 **What it does:**
 - Creates the Telegram bot application using `ApplicationBuilder`
-- Registers all 18 command handlers (`/start`, `/status`, `/history`, `/usage`, `/cost`, `/health`, `/exec`, `/context`, `/cancel`, `/retry`, `/projects`, `/schedule`, `/chain`, `/debug`, `/deploy`, `/servers`, `/stopserver`, `/setup`)
+- Registers all 19 command handlers (`/start`, `/status`, `/history`, `/usage`, `/cost`, `/health`, `/exec`, `/context`, `/cancel`, `/retry`, `/projects`, `/schedule`, `/chain`, `/debug`, `/deploy`, `/servers`, `/stopserver`, `/setup`, `/reindex`)
 - Registers file handlers (documents, photos) and the catch-all text message handler
 - Returns the configured application for `main.py` to start
 
@@ -392,7 +392,22 @@ Package marker.
 
 **Why this way:** The threaded Popen refactor (v8) replaced `proc.communicate(timeout)` to enable line-by-line stdout capture for live streaming. The tiered security model is defense-in-depth: Tier 1 is the hard block, Tier 3 provides audit trail, Tier 4 is defense-in-depth for the subprocess path. Docker provides the actual filesystem isolation boundary.
 
-### `tools/model_router.py` (202 lines, 6.8 KB) — NEW in v8
+### `tools/rag.py` (309 lines, 11 KB) — NEW in v8.7
+**Purpose:** RAG context layer for semantic project file injection using LanceDB + Ollama embeddings.
+
+**What it does:**
+- `_chunk_python()` — AST-based chunking at function/class boundaries. Falls back to line-based on SyntaxError.
+- `_chunk_lines()` — Line-based chunking with configurable overlap (120 lines, 20 overlap) for non-Python files.
+- `chunk_file()` — Dispatcher: routes `.py` to AST chunking, others to line-based. Caps large files at 100KB.
+- `_embed_via_ollama()` — Batches texts in groups of 16, calls Ollama `/api/embed` with `nomic-embed-text`. Pads failed batches with zero vectors.
+- `build_index()` — Collects source files (reuses planner's exclude list), chunks them, embeds, builds LanceDB table with `mode="overwrite"`. Writes `.indexed_at` marker for 24h staleness tracking. Skips projects with >500 files.
+- `query_index()` — Embeds query text, searches LanceDB for top-k similar chunks (default 8). Returns empty list on any failure (graceful degradation).
+
+**Why this way:** Replaces the Claude-based file selector in `_inject_project_files()` which cost ~$0.02/call and failed 16% of the time (21 JSON parse errors in production). RAG uses local Ollama embeddings (zero API cost) and returns semantically relevant chunks instead of random file samples. LanceDB is embedded (no server) matching the SQLite pattern. Legacy file selector preserved as fallback when `RAG_ENABLED=false` or Ollama is down.
+
+---
+
+### `tools/model_router.py` (213 lines, 7.2 KB) — NEW in v8
 **Purpose:** Routes LLM calls to Claude or Ollama based on purpose, complexity, RAM, and budget.
 
 **What it does:**
@@ -491,7 +506,7 @@ Package marker.
 
 ## tests/ — Test Suite
 
-661 tests across 24 files. 625 pass, 36 skip (require Docker Desktop).
+737 tests across 25 files. 726 pass, 11 skip.
 
 ### Existing test files (pre-v8):
 
@@ -520,6 +535,7 @@ Package marker.
 | `test_v8_ux.py` | 11 | Live output registry (4), hash-gated edits (3), debug sidecar (2), stage timing collection (2) |
 | `test_stress_v8.py` | 64 | Adversarial stress round 1: code scanner evasion (15), shell blocklist evasion (10), path traversal (6), concurrency/deadlock (2), output registry (3), privacy (2), memory poisoning (3), dedup/redundancy (3), magic numbers (4), Ollama fallback (3), routing invariants (5), budget escalation (4), edge cases (4) |
 | `test_stress_v8_audit2.py` | 80 | Adversarial stress round 2: 81 tests across expanded security boundary, concurrency contention, logic saturation, and resource routing scenarios |
+| `test_rag.py` | 22 | RAG context layer: Python chunking (4), line chunking (3), file dispatch (5), embedding (2), index build (3), query (2), planner integration (3) |
 
 **Why so many sandbox tests:** The sandbox is the most security-critical module. Every blocked pattern has a test. Every allowed pattern has a test. Every edge case (split flags, long flags, mixed case) is covered. This prevents regressions when adding new patterns.
 

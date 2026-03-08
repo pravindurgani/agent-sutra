@@ -39,6 +39,8 @@ workspace/.pip-cache/
 
 # Test data (local testing artifacts)
 telegram_test/
+telegram_bot_exports_logs_testsuite/
+agentruntime1_bot_*.json
 
 # Deployment-specific (personal paths)
 projects_macmini.yaml

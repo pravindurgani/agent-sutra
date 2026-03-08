@@ -1,6 +1,6 @@
 # AgentSutra — Capabilities & Usage Guide
 
-> **Version:** 8.6.0 | **Last updated:** March 2026
+> **Version:** 8.7.0 | **Last updated:** March 2026
 
 A fully autonomous AI agent controlled via Telegram, running on Mac Mini M2. Claude Sonnet generates, Claude Opus audits. Full shell access, internet, local AI, big data, frontend generation, static deployment, visual verification — all from your phone. Hardened with defense-in-depth security.
 
@@ -11,7 +11,7 @@ A fully autonomous AI agent controlled via Telegram, running on Mac Mini M2. Cla
 1. [What It Can Do](#what-it-can-do)
 2. [7 Task Types](#7-task-types)
 3. [Full Capabilities Matrix](#full-capabilities-matrix)
-4. [18 Telegram Commands](#18-telegram-commands)
+4. [19 Telegram Commands](#19-telegram-commands)
 5. [How to Use It Effectively](#how-to-use-it-effectively)
 6. [Portfolio Project Automations](#portfolio-project-automations)
 7. [General-Purpose Use Cases](#general-purpose-use-cases)
@@ -39,6 +39,8 @@ The agent has the same power level as you at the terminal — controlled from yo
 | Preview generated apps | Auto-starts local server, optional Playwright visual check |
 | Schedule recurring tasks | APScheduler with SQLite persistence, survives reboots |
 | Cross-model auditing | Sonnet generates, Opus reviews — catches hallucinations |
+| RAG code context | LanceDB + Ollama embeddings inject semantically relevant code chunks into planner prompts |
+| Anti-fabrication | File reference validation, auditor fabrication checks, credential pattern filtering in delivered artifacts |
 | Auto-retry with tracebacks | Up to 3 retries, exact error fed back to planner |
 | Conversation memory | SQLite-backed context + project success/failure patterns |
 | Cost tracking + budgets | Per-model token tracking, daily/monthly spend limits |
@@ -207,7 +209,7 @@ Build a Spotify-style music player UI with playlist management
 
 ---
 
-## 18 Telegram Commands
+## 19 Telegram Commands
 
 | Command | What It Does |
 |---------|-------------|
@@ -229,6 +231,7 @@ Build a Spotify-style music player UI with playlist management
 | `/servers` | List running local preview servers |
 | `/stopserver` | Stop a server by task ID or stop all |
 | `/setup` | Validate system config: env vars, Ollama, projects, DB, budget (v8.6) |
+| `/reindex` | Force re-index a project for RAG context (v8.7) |
 
 ---
 
@@ -631,7 +634,7 @@ The job survives bot restarts via APScheduler SQLite persistence.
       |
  [Telegram Bot API]
       |
- [AgentSutra v8.6.0 on Mac Mini M2]
+ [AgentSutra v8.7.0 on Mac Mini M2]
       |
  classify ──> plan ──> execute ──> audit ──> deliver
  (Sonnet)    (Sonnet)  (Sonnet)   (Opus)    (Sonnet)

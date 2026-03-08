@@ -335,7 +335,7 @@ async def cmd_retry(update: Update, context: ContextTypes.DEFAULT_TYPE):
         running_tasks.pop(new_task_id, None)
 
         try:
-            await status_msg.edit_text(f"Completed. (retry {new_task_id[:8]})")
+            await status_msg.edit_text(f"Done. (retry {new_task_id[:8]})")
         except Exception:
             pass
 
@@ -1344,6 +1344,41 @@ async def cmd_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     total = len(checks)
     lines.append(f"\n{pass_count}/{total} checks passed")
     await update.message.reply_text("\n".join(lines))
+
+
+@auth_required
+async def cmd_reindex(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Force re-index a project for RAG: /reindex <project_name>."""
+    args = context.args
+    if not args:
+        await update.message.reply_text("Usage: /reindex <project_name>")
+        return
+
+    project_name = " ".join(args)
+    from tools.projects import load_projects
+    projects = load_projects()
+    project = projects.get(project_name)
+    if not project:
+        await update.message.reply_text(f"Unknown project: {project_name}")
+        return
+
+    await update.message.reply_text(f"Re-indexing {project_name}...")
+    try:
+        from tools.rag import build_index
+        # Delete staleness marker to force rebuild
+        marker = config.RAG_INDEX_DIR / project_name / ".indexed_at"
+        if marker.exists():
+            marker.unlink()
+        success = await asyncio.get_event_loop().run_in_executor(
+            None, build_index, project_name, Path(project["path"]),
+        )
+        if success:
+            await update.message.reply_text(f"Re-indexed {project_name}.")
+        else:
+            await update.message.reply_text(f"Failed to index {project_name}. Check logs.")
+    except Exception as e:
+        logger.warning("Re-index failed for %s: %s", project_name, e)
+        await update.message.reply_text(f"Error: {e}")
 
 
 @auth_required

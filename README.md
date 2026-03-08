@@ -58,7 +58,8 @@ Failed audits retry up to 3 times with traceback injection.
 | **Schedule & Forget** | APScheduler with SQLite persistence. `/schedule 1440 Daily briefing` — survives reboots. |
 | **Cross-Task Memory** | Project tasks store success/failure patterns. The planner injects lessons learned to prevent repeated failures. |
 | **Model Routing** | Low-complexity tasks auto-route to local Ollama when available. Budget escalation at 70% daily spend. Audit always stays on Opus. |
-| **Full System Access** | Shell, internet, pip install, Ollama, big data, frontends — hardened with a 39-pattern blocklist, code scanner, Docker isolation, credential stripping, and budget enforcement. |
+| **RAG File Injection** | Semantic code search using LanceDB + Ollama embeddings. AST-aware Python chunking at function/class boundaries. Replaces random file sampling for project tasks. `/reindex` to refresh. |
+| **Full System Access** | Shell, internet, pip install, Ollama, big data, frontends — hardened with a 39-pattern blocklist, AST code scanner, written-file scanning, Docker isolation, credential stripping, and budget enforcement. |
 
 ---
 
@@ -168,10 +169,11 @@ AgentSutra/
 │       └── deliverer.py     # Formats, deploys, and sends results
 ├── bot/
 │   ├── telegram_bot.py      # Bot factory + command registration
-│   └── handlers.py          # 18 command handlers + auth
+│   └── handlers.py          # 19 command handlers + auth
 ├── tools/
 │   ├── claude_client.py     # Anthropic API wrapper + cost tracking
 │   ├── sandbox.py           # Code execution + server management
+│   ├── rag.py               # RAG context: LanceDB + Ollama embeddings
 │   ├── deployer.py          # GitHub Pages / Vercel / Firebase deploy
 │   ├── visual_check.py      # Playwright headless verification
 │   ├── file_manager.py      # Upload/download with UUID dedup
@@ -179,7 +181,7 @@ AgentSutra/
 │   └── projects.py          # YAML project registry loader
 ├── storage/db.py            # SQLite with WAL mode
 ├── scheduler/cron.py        # APScheduler with SQLite persistence
-├── tests/                   # 24 test files
+├── tests/                   # 25 test files
 ├── projects.yaml            # Your registered projects
 └── .env.example             # Configuration template
 ```
@@ -218,6 +220,7 @@ AgentSutra/
 | `/stopserver` | Stop a server by task ID or stop all |
 | `/retry` | Re-run failed/crashed tasks with same input |
 | `/setup` | Validate system configuration (env, Ollama, projects, DB) |
+| `/reindex` | Force re-index a project for RAG context |
 | `/usage` | Lifetime API token counts |
 
 ---
@@ -230,7 +233,7 @@ AgentSutra gives an LLM direct access to your machine. The security model is **d
 |-------|-------------|
 | **Authentication** | Telegram user ID allowlist. Unauthorized users silently ignored. |
 | **Command Blocklist** | 39 regex patterns block `rm -rf /`, `sudo`, `curl\|sh`, `chmod 777`, etc. |
-| **Code Scanner** | 51 patterns scan Python/JS for credential reads, exec/eval, subprocess, os.popen, ctypes, base64 decode, obfuscation. |
+| **Code Scanner** | 51 patterns scan Python/JS for credential reads, exec/eval, os.popen, ctypes, base64 decode, obfuscation. AST constant folding catches string concatenation bypasses. Smart subprocess allowlist. Post-execution written-file scanning. |
 | **Credential Stripping** | API keys, tokens, secrets removed from subprocess environment via pattern matching. |
 | **Docker Isolation** | Optional hard filesystem boundary. Only `workspace/` is mounted read-write. |
 | **Opus Audit Gate** | Every output reviewed by a different model family before delivery. XML-delimited prompts resist injection. |
@@ -295,6 +298,7 @@ All configuration is via `.env`. See `.env.example` for the full template.
 | Visualization | matplotlib, seaborn |
 | Local AI | [Ollama](https://ollama.ai/) |
 | Deployment | GitHub Pages, Vercel, Firebase Hosting |
+| RAG / Embeddings | LanceDB + nomic-embed-text (via Ollama) |
 | Visual QA | Playwright (headless Chromium) |
 
 ---

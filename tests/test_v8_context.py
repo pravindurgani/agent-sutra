@@ -232,8 +232,13 @@ class TestPlannerMemoryInjection:
 
 
 class TestDynamicFileInjection:
-    """Verify _inject_project_files selects and injects relevant files."""
+    """Verify _inject_project_files selects and injects relevant files.
 
+    These tests exercise the legacy Claude-based file selector path,
+    so RAG is disabled to prevent it from intercepting.
+    """
+
+    @patch.object(config, "RAG_ENABLED", False)
     def test_injects_files_for_small_project(self, tmp_path):
         """Project with 3 .py files → system prompt gets RELEVANT CODE FROM."""
         # Create a small project directory
@@ -258,6 +263,7 @@ class TestDynamicFileInjection:
         assert "print('hello')" in result
         assert "DB_URL" in result
 
+    @patch.object(config, "RAG_ENABLED", False)
     def test_skips_large_project(self, tmp_path):
         """Project with >50 files → injection skipped, system returned unmodified."""
         for i in range(55):
@@ -274,6 +280,7 @@ class TestDynamicFileInjection:
         result = _inject_project_files(state, "BASE SYSTEM")
         assert result == "BASE SYSTEM"  # Unmodified
 
+    @patch.object(config, "RAG_ENABLED", False)
     def test_invalid_json_skips_gracefully(self, tmp_path):
         """Claude returns garbage → injection skips, no crash."""
         (tmp_path / "app.py").write_text("import flask")
@@ -291,6 +298,7 @@ class TestDynamicFileInjection:
 
         assert result == "BASE SYSTEM"  # Unmodified, no crash
 
+    @patch.object(config, "RAG_ENABLED", False)
     def test_excludes_pycache_dirs(self, tmp_path):
         """Files inside __pycache__ should not appear in the file tree."""
         (tmp_path / "app.py").write_text("main code")
@@ -314,6 +322,7 @@ class TestDynamicFileInjection:
         selector_prompt = mock_call.call_args[0][0]
         assert "__pycache__" not in selector_prompt
 
+    @patch.object(config, "RAG_ENABLED", False)
     def test_path_traversal_blocked(self, tmp_path):
         """LLM-suggested paths like ../../.env must not escape project root (M-2)."""
         (tmp_path / "app.py").write_text("main code")

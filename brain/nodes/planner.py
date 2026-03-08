@@ -283,10 +283,13 @@ _INJECT_EXCLUDE_DIRS = {"__pycache__", "node_modules", ".next", "venv", ".venv",
 
 
 def _inject_project_files(state: AgentState, system: str) -> str:
-    """Select and inject the most relevant source files for a project task.
+    """Inject relevant project code into the system prompt using RAG.
 
-    Costs one extra Sonnet call (~$0.02) to pick files. If anything fails,
-    returns the system prompt unmodified.
+    Uses vector similarity search (LanceDB + nomic-embed-text) to find
+    relevant code chunks. Falls back to the legacy file selector if RAG
+    is disabled or the index doesn't exist.
+
+    Costs: ~0.5s Ollama embedding call (no Claude API cost).
     """
     import json
 
@@ -297,18 +300,43 @@ def _inject_project_files(state: AgentState, system: str) -> str:
     if not project_path.is_dir():
         return system
 
-    # Collect source files, respecting exclusion list
+    # Try RAG first
+    if config.RAG_ENABLED:
+        try:
+            from tools.rag import build_index, query_index
+
+            # Build/refresh index (no-op if fresh)
+            build_index(project_name, project_path)
+
+            # Query with the task message
+            chunks = query_index(project_name, state["message"])
+            if chunks:
+                injected = "\n\n".join(c["text"] for c in chunks)
+                system += (
+                    f"\n\nRELEVANT CODE FROM {project_name.upper()} (via RAG):\n"
+                    + injected
+                )
+                logger.info(
+                    "RAG injected %d chunks for %s (files: %s)",
+                    len(chunks), project_name,
+                    ", ".join(sorted(set(c["file_path"] for c in chunks))),
+                )
+                return system
+        except ImportError:
+            logger.warning("lancedb not installed, falling back to file selector")
+        except Exception as e:
+            logger.warning("RAG failed for %s: %s, falling back", project_name, e)
+
+    # Legacy fallback: Claude-based file selector (existing logic)
     source_files: list[str] = []
     try:
         _enum_count = 0
         for p in project_path.rglob("*"):
-            # A-28: Early exit to avoid traversing 100K+ files
             _enum_count += 1
             if _enum_count > config.MAX_FILE_INJECT_COUNT * 2:
                 break
             if any(excluded in p.parts for excluded in _INJECT_EXCLUDE_DIRS):
                 continue
-            # A-23: Skip symlinks — they could point outside project dir
             if p.is_symlink():
                 continue
             if p.is_file() and p.suffix in _INJECT_EXTENSIONS:
@@ -317,18 +345,9 @@ def _inject_project_files(state: AgentState, system: str) -> str:
         logger.warning("Failed to scan project directory %s: %s", project_path, e)
         return system
 
-    if not source_files:
+    if not source_files or len(source_files) > config.MAX_FILE_INJECT_COUNT:
         return system
 
-    # Skip injection for large projects — doesn't scale without RAG
-    if len(source_files) > config.MAX_FILE_INJECT_COUNT:
-        logger.info(
-            "Skipping file injection for %s: %d files exceeds %d-file cap",
-            project_name, len(source_files), config.MAX_FILE_INJECT_COUNT,
-        )
-        return system
-
-    # Ask Claude to pick the 3-5 most relevant files
     tree_listing = "\n".join(sorted(source_files))
     selector_prompt = (
         f"Task: {state['message'][:500]}\n\n"
@@ -336,35 +355,17 @@ def _inject_project_files(state: AgentState, system: str) -> str:
     )
 
     try:
-        selected = None
-        for attempt in range(2):
-            selection = claude_client.call(
-                selector_prompt,
-                system=_FILE_SELECTOR_SYSTEM,
-                max_tokens=300,
-                temperature=0.0,
-            )
-            try:
-                selected = json.loads(selection)
-                if not isinstance(selected, list):
-                    raise ValueError("Expected a JSON list")
-                break
-            except (json.JSONDecodeError, ValueError):
-                if attempt == 0:
-                    logger.warning(
-                        "File selector parse failure (task %s), retrying. Raw: %s",
-                        state.get("task_id", "?"), selection[:200],
-                    )
-                    continue
-                logger.warning("File selector failed twice, falling back to enumeration")
-                selected = []
-        if selected is None:
-            selected = []
-    except Exception as e:
-        logger.warning("File selector call failed: %s", e)
+        selection = claude_client.call(
+            selector_prompt, system=_FILE_SELECTOR_SYSTEM,
+            max_tokens=300, temperature=0.0,
+        )
+        selected = json.loads(selection)
+        if not isinstance(selected, list):
+            raise ValueError("Expected a JSON list")
+    except (json.JSONDecodeError, ValueError, Exception) as e:
+        logger.warning("File selector failed: %s", e)
         return system
 
-    # Read selected files and append to system prompt
     resolved_root = project_path.resolve()
     injected_parts: list[str] = []
     for rel_path in selected[:5]:
@@ -387,6 +388,6 @@ def _inject_project_files(state: AgentState, system: str) -> str:
             f"\n\nRELEVANT CODE FROM {project_name.upper()}:\n"
             + "\n\n".join(injected_parts)
         )
-        logger.info("Injected %d files for project %s", len(injected_parts), project_name)
+        logger.info("Injected %d files for project %s (legacy)", len(injected_parts), project_name)
 
     return system

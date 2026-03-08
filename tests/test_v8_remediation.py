@@ -10,6 +10,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import requests
 from pathlib import Path
 from unittest.mock import patch, MagicMock
+
+import config
 from brain.nodes.deliverer import deliver
 from brain.nodes.executor import _detect_truncation
 
@@ -1042,63 +1044,55 @@ class TestTaskCompletionSummary:
         assert total_ms == 0
 
 
-# ── 7C: File selector retry ───────────────────────────────────────
+# ── 7C/9D: Legacy file selector fallback (RAG disabled) ──────────
 
 
-class TestFileSelectorRetry:
-    """File selector should retry once on parse failure."""
+class TestLegacyFileSelectorFallback:
+    """Legacy file selector (RAG disabled) handles parse failure gracefully."""
 
+    @patch.object(config, "RAG_ENABLED", False)
     @patch("brain.nodes.planner.claude_client")
-    def test_retry_on_parse_failure(self, mock_claude):
-        """Invalid JSON first, valid JSON second — should succeed."""
+    def test_valid_json_injects_files(self, mock_claude):
+        """Valid JSON response → files injected via legacy path."""
         import json
-        mock_claude.call.side_effect = [
-            "Here are the files: config.py, main.py",  # Not JSON
-            json.dumps(["config.py", "main.py"]),       # Valid JSON
-        ]
-        from brain.nodes.planner import _inject_project_files, _FILE_SELECTOR_SYSTEM
-        import config as _cfg
         import tempfile
+        mock_claude.call.return_value = json.dumps(["config.py"])
+        from brain.nodes.planner import _inject_project_files
 
         with tempfile.TemporaryDirectory() as td:
             p = Path(td)
             (p / "config.py").write_text("X=1")
-            (p / "main.py").write_text("print('hi')")
 
             state = {
-                "task_id": "test-retry",
+                "task_id": "test-legacy",
                 "message": "Fix the config",
                 "project_config": {"path": str(p)},
                 "project_name": "test-proj",
             }
             result = _inject_project_files(state, "base system prompt")
-            # Should have retried and succeeded — files injected
-            assert mock_claude.call.call_count == 2
-            assert "config.py" in result or result == "base system prompt"
+            assert mock_claude.call.call_count == 1
+            assert "config.py" in result
 
+    @patch.object(config, "RAG_ENABLED", False)
     @patch("brain.nodes.planner.claude_client")
-    def test_double_failure_falls_back(self, mock_claude):
-        """Two invalid JSON responses → falls back to empty selection."""
-        mock_claude.call.side_effect = [
-            "not json at all",
-            "still not json",
-        ]
-        from brain.nodes.planner import _inject_project_files
+    def test_invalid_json_returns_base(self, mock_claude):
+        """Invalid JSON response → returns base prompt unmodified."""
         import tempfile
+        mock_claude.call.return_value = "not json at all"
+        from brain.nodes.planner import _inject_project_files
 
         with tempfile.TemporaryDirectory() as td:
             p = Path(td)
             (p / "config.py").write_text("X=1")
 
             state = {
-                "task_id": "test-double-fail",
+                "task_id": "test-fallback",
                 "message": "Fix it",
                 "project_config": {"path": str(p)},
                 "project_name": "test-proj",
             }
             result = _inject_project_files(state, "base prompt")
-            assert mock_claude.call.call_count == 2
-            # Falls back — no files injected, returns base prompt
+            assert mock_claude.call.call_count == 1
             assert result == "base prompt"
 
 

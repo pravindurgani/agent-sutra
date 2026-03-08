@@ -69,7 +69,7 @@ Every architectural decision in this codebase was made through the lens of: **"W
          |
     [Telegram Bot API]
          |
-    [bot/telegram_bot.py]        Entry point: 18 commands, file handlers
+    [bot/telegram_bot.py]        Entry point: 19 commands, file handlers
          |
     [bot/handlers.py]            Auth, streaming status, file routing
          |                            |
@@ -134,8 +134,8 @@ AgentSutra/
 |
 |-- bot/                        # Telegram bot layer
 |   |-- __init__.py
-|   |-- telegram_bot.py         # Bot application setup, 18 command handlers + 3 message handlers
-|   +-- handlers.py             # 18 command handlers + 3 message handlers, resource guards, streaming status
+|   |-- telegram_bot.py         # Bot application setup, 19 command handlers + 3 message handlers
+|   +-- handlers.py             # 19 command handlers + 3 message handlers, resource guards, streaming status
 |
 |-- brain/                      # LangGraph agent pipeline
 |   |-- __init__.py
@@ -240,7 +240,7 @@ AgentSutra/
 
 ### `bot/telegram_bot.py` - Bot Setup
 - Creates `ApplicationBuilder` with bot token from config
-- Registers 18 command handlers: `/start`, `/status`, `/history`, `/usage`, `/cost`, `/health`, `/exec`, `/context`, `/cancel`, `/retry`, `/projects`, `/schedule`, `/chain`, `/debug`, `/deploy`, `/servers`, `/stopserver`, `/setup`
+- Registers 19 command handlers: `/start`, `/status`, `/history`, `/usage`, `/cost`, `/health`, `/exec`, `/context`, `/cancel`, `/retry`, `/projects`, `/schedule`, `/chain`, `/debug`, `/deploy`, `/servers`, `/stopserver`, `/setup`, `/reindex`
 - Registers file handlers (Document, Photo) before text handler to ensure proper routing
 - Text handler is catch-all for non-command messages via `filters.TEXT & ~filters.COMMAND`
 
@@ -647,7 +647,7 @@ Default model: claude-sonnet-4-6
 Workspace: /Users/you/Desktop/AgentSutra/workspace
 Database initialized at /Users/you/Desktop/AgentSutra/storage/agentsutra.db
 Projects registered: 8
-Telegram bot configured with 18 command handlers
+Telegram bot configured with 19 command handlers
 Scheduler started (0 persisted jobs loaded)
 Starting Telegram bot (polling mode)...
 Send /start to your bot to begin

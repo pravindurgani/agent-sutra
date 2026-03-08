@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-VERSION = "8.6.0"
+VERSION = "8.7.0"
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
@@ -128,6 +128,16 @@ SERVER_PORT_RANGE_END = _safe_int("SERVER_PORT_RANGE_END", 8120)
 # Visual verification (Playwright headless Chromium)
 VISUAL_CHECK_ENABLED = os.getenv("VISUAL_CHECK_ENABLED", "false").lower() == "true"
 VISUAL_CHECK_TIMEOUT = _safe_int("VISUAL_CHECK_TIMEOUT", 15)
+
+# RAG configuration (vector search for project file injection)
+RAG_ENABLED = os.getenv("RAG_ENABLED", "true").lower() == "true"
+RAG_EMBED_MODEL = os.getenv("RAG_EMBED_MODEL", "nomic-embed-text")
+RAG_INDEX_DIR = Path.home() / ".agentsutra" / "rag_indexes"
+RAG_CHUNK_SIZE = 120          # lines per chunk (code-aware, see tools/rag.py)
+RAG_CHUNK_OVERLAP = 20        # lines overlap between chunks
+RAG_TOP_K = 8                 # chunks to retrieve
+RAG_STALE_HOURS = 24          # re-index if older than this
+RAG_MAX_INDEX_FILES = 500     # skip indexing if project exceeds this
 
 # Telegram limits
 TELEGRAM_MAX_MESSAGE_LENGTH = 4096

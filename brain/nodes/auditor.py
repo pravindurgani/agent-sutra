@@ -39,7 +39,12 @@ CRITICAL CHECK — Did the agent actually do what was asked?
 - If the task asked to import a specific library and the code imported a DIFFERENT library, that is a FAILURE
 - If the task asked to connect to a specific database/service and the code generated fake/sample data instead, that is a FAILURE
 - If the task asked for X and the agent did Y (even if Y is reasonable), the verdict must be FAIL
-- "Graceful degradation" is NOT success — if the core task couldn't be completed, verdict = fail"""
+- "Graceful degradation" is NOT success — if the core task couldn't be completed, verdict = fail
+
+FABRICATION CHECK (CRITICAL):
+- If task asks to read a SPECIFIC file and code CREATES sample data instead: FAIL
+- If code generates realistic credentials (ghp_*, ya29.*, sk-*) as test data: FAIL
+- Look for open(..., "w") creating files that match names the task asked to READ"""
 
 AUDIT_CRITERIA = {
     "code": """

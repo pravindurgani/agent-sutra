@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json as _json
+import re
 import uuid
 import logging
 from pathlib import Path
@@ -11,6 +12,32 @@ from storage.db import sync_write_project_memory
 import config
 
 logger = logging.getLogger(__name__)
+
+# 5C: Credential patterns — block delivery of artifacts containing these
+_CREDENTIAL_RE = [
+    re.compile(r'\bghp_[a-zA-Z0-9]{36}\b'),       # GitHub PAT
+    re.compile(r'\bya29\.[a-zA-Z0-9_-]{50,}\b'),   # Google OAuth
+    re.compile(r'\bsk-[a-zA-Z0-9]{48}\b'),          # OpenAI key
+    re.compile(r'\bAKIA[A-Z0-9]{16}\b'),            # AWS access key
+]
+
+
+def _has_credential_patterns(path: Path) -> bool:
+    """Check if a text artifact contains credential-shaped strings.
+
+    Args:
+        path: Path to the artifact file.
+
+    Returns:
+        True if credential patterns are detected, False otherwise.
+    """
+    if path.suffix not in ('.log', '.txt', '.json', '.yaml', '.yml', '.csv'):
+        return False
+    try:
+        content = path.read_text(errors='replace')[:50_000]
+        return any(p.search(content) for p in _CREDENTIAL_RE)
+    except OSError:
+        return False
 
 SUMMARY_SYSTEM = """You are formatting a task result for delivery via Telegram chat.
 You receive the original request, the execution output, and context.
@@ -60,6 +87,13 @@ def deliver(state: AgentState) -> dict:
         screenshot = config.OUTPUTS_DIR / "preview.png"
         if screenshot.exists() and str(screenshot) not in artifacts:
             artifacts.append(str(screenshot))
+
+    # 5C: Filter artifacts containing credential-shaped strings
+    filtered = [a for a in artifacts if not _has_credential_patterns(Path(a))]
+    if len(filtered) < len(artifacts):
+        blocked = len(artifacts) - len(filtered)
+        logger.warning("Blocked %d artifact(s) containing credential patterns", blocked)
+    artifacts = filtered
 
     # Deploy if enabled and audit passed
     deploy_url = ""

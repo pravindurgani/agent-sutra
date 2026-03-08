@@ -15,6 +15,36 @@ from tools.file_manager import get_file_content
 
 logger = logging.getLogger(__name__)
 
+# 5A: File extensions to detect in user messages for existence checks
+_FILE_REF_RE = re.compile(
+    r'[\w./~-]+\.(?:log|csv|json|xlsx|txt|py|yaml|yml|db|sqlite)\b'
+)
+
+
+def _check_referenced_files(message: str, working_dir: Path) -> str:
+    """Return a warning if files referenced in the message don't exist.
+
+    Args:
+        message: The user's task message.
+        working_dir: The working directory for the task.
+
+    Returns:
+        A warning string to inject into the prompt, or empty string.
+    """
+    file_refs = _FILE_REF_RE.findall(message)
+    missing = []
+    for ref in file_refs:
+        expanded = Path(ref).expanduser()
+        if not expanded.exists() and not (working_dir / Path(ref).name).exists():
+            missing.append(ref)
+    if missing:
+        return (
+            "\nWARNING: These files do NOT exist: " + ", ".join(missing) + ". "
+            "Do NOT create fake/sample versions. Report the file was not found "
+            "and FAIL. NEVER fabricate data for a missing file."
+        )
+    return ""
+
 
 def _detect_truncation(code: str) -> bool:
     """Check if generated code appears truncated by max_tokens limit.
@@ -491,6 +521,12 @@ def _execute_code(state: AgentState) -> dict:
     )
 
     prompt = f"Plan:\n{plan}\n\nOriginal task: {state['message']}"
+
+    # 5A: Warn about referenced files that don't exist — prevents fabrication
+    working_dir_5a = _determine_working_dir(state) or config.OUTPUTS_DIR
+    file_warning = _check_referenced_files(state["message"], working_dir_5a)
+    if file_warning:
+        prompt += file_warning
 
     if state.get("files"):
         prompt += "\n\nAvailable files (use these exact paths):"

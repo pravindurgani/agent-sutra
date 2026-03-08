@@ -874,3 +874,137 @@ class TestTimeoutProgressFeedback:
         assert warn_threshold == config.LONG_TIMEOUT * 0.8
         # Warning fires after progress
         assert warn_threshold > progress_threshold
+
+
+# ── 5A: Executor file reference validation ─────────────────────────
+
+
+class TestCheckReferencedFiles:
+    """_check_referenced_files should warn about missing files in the message."""
+
+    def test_missing_file_returns_warning(self, tmp_path):
+        """Non-existent file reference produces a warning."""
+        from brain.nodes.executor import _check_referenced_files
+        result = _check_referenced_files("grep error nonexistent_server.log", tmp_path)
+        assert "WARNING" in result
+        assert "nonexistent_server.log" in result
+        assert "NEVER fabricate" in result
+
+    def test_existing_file_returns_empty(self, tmp_path):
+        """File that exists in working_dir produces no warning."""
+        from brain.nodes.executor import _check_referenced_files
+        (tmp_path / "data.csv").write_text("a,b\n1,2\n")
+        result = _check_referenced_files("analyse data.csv", tmp_path)
+        assert result == ""
+
+    def test_multiple_refs_some_missing(self, tmp_path):
+        """Multiple refs — only missing ones are listed."""
+        from brain.nodes.executor import _check_referenced_files
+        (tmp_path / "report.json").write_text("{}")
+        result = _check_referenced_files(
+            "read report.json and compare with metrics.csv", tmp_path
+        )
+        assert "metrics.csv" in result
+        assert "report.json" not in result
+
+    def test_no_file_refs_returns_empty(self, tmp_path):
+        """Message with no file references returns empty string."""
+        from brain.nodes.executor import _check_referenced_files
+        result = _check_referenced_files("create a fibonacci function", tmp_path)
+        assert result == ""
+
+    def test_tilde_expansion(self, tmp_path):
+        """Home-relative paths are expanded for existence check."""
+        from brain.nodes.executor import _check_referenced_files
+        # ~/nonexistent_file_xyz.log won't exist
+        result = _check_referenced_files(
+            "tail ~/nonexistent_file_xyz.log", tmp_path
+        )
+        assert "WARNING" in result
+
+
+# ── 5B: Auditor fabrication prompt ─────────────────────────────────
+
+
+class TestAuditorFabricationPrompt:
+    """Auditor system prompt must include fabrication check criteria."""
+
+    def test_fabrication_check_in_system_base(self):
+        """SYSTEM_BASE includes the fabrication check section."""
+        from brain.nodes.auditor import SYSTEM_BASE
+        assert "FABRICATION CHECK" in SYSTEM_BASE
+        assert "sample data instead" in SYSTEM_BASE
+        assert "ghp_*" in SYSTEM_BASE
+        assert 'open(..., "w")' in SYSTEM_BASE
+
+    def test_fabrication_check_preserved_existing_content(self):
+        """Adding fabrication check didn't break existing SYSTEM_BASE content."""
+        from brain.nodes.auditor import SYSTEM_BASE
+        assert "STRICT quality auditor" in SYSTEM_BASE
+        assert "adversarial review" in SYSTEM_BASE
+        assert "Graceful degradation" in SYSTEM_BASE
+
+
+# ── 5C: Deliverer credential pattern filter ────────────────────────
+
+
+class TestDelivererCredentialFilter:
+    """Artifacts containing credential-shaped strings must be blocked."""
+
+    def test_github_pat_blocked(self, tmp_path):
+        """File containing a GitHub PAT pattern is blocked."""
+        from brain.nodes.deliverer import _has_credential_patterns
+        f = tmp_path / "output.json"
+        f.write_text('{"token": "ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ123456789a"}')
+        assert _has_credential_patterns(f) is True
+
+    def test_aws_key_blocked(self, tmp_path):
+        """File containing an AWS access key pattern is blocked."""
+        from brain.nodes.deliverer import _has_credential_patterns
+        f = tmp_path / "config.yaml"
+        f.write_text("aws_access_key: AKIAIOSFODNN7EXAMPLE")
+        assert _has_credential_patterns(f) is True
+
+    def test_openai_key_blocked(self, tmp_path):
+        """File containing an OpenAI key pattern is blocked."""
+        from brain.nodes.deliverer import _has_credential_patterns
+        f = tmp_path / "secrets.txt"
+        f.write_text("sk-" + "a" * 48)
+        assert _has_credential_patterns(f) is True
+
+    def test_safe_file_not_blocked(self, tmp_path):
+        """File without credential patterns passes through."""
+        from brain.nodes.deliverer import _has_credential_patterns
+        f = tmp_path / "results.json"
+        f.write_text('{"accuracy": 0.95, "model": "v2"}')
+        assert _has_credential_patterns(f) is False
+
+    def test_py_files_not_checked(self, tmp_path):
+        """Python source files are not checked (per spec)."""
+        from brain.nodes.deliverer import _has_credential_patterns
+        f = tmp_path / "script.py"
+        f.write_text('API_KEY = "ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ123456789a"')
+        assert _has_credential_patterns(f) is False
+
+    def test_binary_files_not_checked(self, tmp_path):
+        """Binary/image files are not checked."""
+        from brain.nodes.deliverer import _has_credential_patterns
+        f = tmp_path / "chart.png"
+        f.write_bytes(b'\x89PNG\r\n' + b'ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ123456789a'.ljust(50))
+        assert _has_credential_patterns(f) is False
+
+    def test_credential_filter_in_deliver(self):
+        """deliver() filters artifacts with credential patterns."""
+        from brain.nodes.deliverer import _has_credential_patterns
+        from pathlib import Path
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            safe = Path(td) / "output.csv"
+            safe.write_text("a,b\n1,2\n")
+            cred = Path(td) / "leaked.json"
+            cred.write_text('{"key": "ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ123456789a"}')
+
+            artifacts = [str(safe), str(cred)]
+            filtered = [a for a in artifacts if not _has_credential_patterns(Path(a))]
+            assert str(safe) in filtered
+            assert str(cred) not in filtered

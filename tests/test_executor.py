@@ -343,3 +343,25 @@ class TestDetectTruncationShebangGuard:
         for i in range(5):
             code += f"if [ -d dir{i} ]; then\n  ls dir{i}\n"
         assert _detect_truncation(code) is True
+
+
+# ── _check_referenced_files (Phase 2) ────────────────────────────
+
+
+from brain.nodes.executor import _check_referenced_files
+
+
+class TestCheckReferencedFilesExitLanguage:
+    """_check_referenced_files() must instruct sys.exit(1) for missing files."""
+
+    def test_check_referenced_files_missing_warns_exit(self, tmp_path):
+        """Missing file warning includes sys.exit(1) instruction."""
+        warning = _check_referenced_files("Analyse data.csv for trends", tmp_path)
+        assert "sys.exit(1)" in warning
+        assert "data.csv" in warning
+
+    def test_check_referenced_files_existing_no_warn(self, tmp_path):
+        """Existing file produces no warning."""
+        (tmp_path / "data.csv").write_text("a,b\n1,2\n")
+        warning = _check_referenced_files("Analyse data.csv for trends", tmp_path)
+        assert warning == ""

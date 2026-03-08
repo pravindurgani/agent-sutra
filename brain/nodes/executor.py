@@ -40,8 +40,8 @@ def _check_referenced_files(message: str, working_dir: Path) -> str:
     if missing:
         return (
             "\nWARNING: These files do NOT exist: " + ", ".join(missing) + ". "
-            "Do NOT create fake/sample versions. Report the file was not found "
-            "and FAIL. NEVER fabricate data for a missing file."
+            "Do NOT create fake/sample versions. Call sys.exit(1) with a clear error message "
+            "stating which file was not found. NEVER fabricate data for a missing file."
         )
     return ""
 

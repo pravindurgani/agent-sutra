@@ -135,6 +135,13 @@ class TestEnvironmentErrorDetection:
         assert _detect_environment_error("") is None
         assert _detect_environment_error(None) is None
 
+    def test_audit_prompt_includes_fabrication_checks(self):
+        """Auditor system prompt must include Phase 2 fabrication guards."""
+        from brain.nodes.auditor import SYSTEM_BASE
+        assert "fake/mock data" in SYSTEM_BASE.lower() or "sample/fake/mock" in SYSTEM_BASE.lower()
+        assert "fabricates" in SYSTEM_BASE.lower() or "fabricate" in SYSTEM_BASE.lower()
+        assert "xoxb_" in SYSTEM_BASE or "xoxb-" in SYSTEM_BASE
+
     def test_env_error_forces_max_retries(self):
         """Environment errors should set retry_count to MAX_RETRIES."""
         from brain.nodes.auditor import audit

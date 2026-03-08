@@ -982,11 +982,47 @@ class TestDelivererCredentialFilter:
         f.write_text('{"accuracy": 0.95, "model": "v2"}')
         assert _has_credential_patterns(f) is False
 
-    def test_py_files_not_checked(self, tmp_path):
-        """Python source files are not checked (per spec)."""
+    def test_py_files_now_checked(self, tmp_path):
+        """Python source files ARE scanned for credentials (Phase 1)."""
         from brain.nodes.deliverer import _has_credential_patterns
         f = tmp_path / "script.py"
         f.write_text('API_KEY = "ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ123456789a"')
+        assert _has_credential_patterns(f) is True
+
+    def test_credential_filter_anthropic_key(self, tmp_path):
+        """Anthropic API key pattern is detected."""
+        from brain.nodes.deliverer import _has_credential_patterns
+        key = "sk-ant-api03-" + "a" * 95
+        f = tmp_path / "config.json"
+        f.write_text(f'{{"key": "{key}"}}')
+        assert _has_credential_patterns(f) is True
+
+    def test_credential_filter_slack_token(self, tmp_path):
+        """Slack bot token pattern is detected."""
+        from brain.nodes.deliverer import _has_credential_patterns
+        f = tmp_path / "slack.txt"
+        f.write_text("bot_token: xoxb-123456789-abcdefghij")
+        assert _has_credential_patterns(f) is True
+
+    def test_credential_filter_telegram_token(self, tmp_path):
+        """Telegram bot token pattern is detected."""
+        from brain.nodes.deliverer import _has_credential_patterns
+        f = tmp_path / "env.txt"
+        f.write_text("TELEGRAM_TOKEN=1234567890:" + "A" * 35)
+        assert _has_credential_patterns(f) is True
+
+    def test_credential_filter_scans_html_files(self, tmp_path):
+        """HTML files are now scanned for credential patterns."""
+        from brain.nodes.deliverer import _has_credential_patterns
+        f = tmp_path / "page.html"
+        f.write_text('<script>const key = "ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ123456789a";</script>')
+        assert _has_credential_patterns(f) is True
+
+    def test_credential_filter_allows_clean_py(self, tmp_path):
+        """Python files without credentials pass through."""
+        from brain.nodes.deliverer import _has_credential_patterns
+        f = tmp_path / "clean.py"
+        f.write_text('print("hello world")\nx = 42\n')
         assert _has_credential_patterns(f) is False
 
     def test_binary_files_not_checked(self, tmp_path):

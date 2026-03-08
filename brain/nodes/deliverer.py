@@ -15,10 +15,13 @@ logger = logging.getLogger(__name__)
 
 # 5C: Credential patterns — block delivery of artifacts containing these
 _CREDENTIAL_RE = [
-    re.compile(r'\bghp_[a-zA-Z0-9]{36}\b'),       # GitHub PAT
-    re.compile(r'\bya29\.[a-zA-Z0-9_-]{50,}\b'),   # Google OAuth
-    re.compile(r'\bsk-[a-zA-Z0-9]{48}\b'),          # OpenAI key
-    re.compile(r'\bAKIA[A-Z0-9]{16}\b'),            # AWS access key
+    re.compile(r'\bghp_[a-zA-Z0-9]{36}\b'),            # GitHub PAT
+    re.compile(r'\bya29\.[a-zA-Z0-9_-]{50,}\b'),        # Google OAuth
+    re.compile(r'\bsk-[a-zA-Z0-9]{48}\b'),               # OpenAI key
+    re.compile(r'\bAKIA[A-Z0-9]{16}\b'),                 # AWS access key
+    re.compile(r'\bsk-ant-api\d{2}-[a-zA-Z0-9_-]{90,}\b'),  # Anthropic key
+    re.compile(r'\bxoxb-[0-9]+-[a-zA-Z0-9]+\b'),        # Slack bot token
+    re.compile(r'\b\d{8,10}:[A-Za-z0-9_-]{35}\b'),      # Telegram bot token
 ]
 
 
@@ -45,7 +48,7 @@ def _has_credential_patterns(path: Path) -> bool:
     Returns:
         True if credential patterns are detected, False otherwise.
     """
-    if path.suffix not in ('.log', '.txt', '.json', '.yaml', '.yml', '.csv'):
+    if path.suffix not in ('.log', '.txt', '.json', '.yaml', '.yml', '.csv', '.py', '.html', '.js'):
         return False
     try:
         content = path.read_text(errors='replace')[:50_000]

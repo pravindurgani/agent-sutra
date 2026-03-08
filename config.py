@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 
 VERSION = "8.6.0"
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 
 def _safe_int(key: str, default: int) -> int:

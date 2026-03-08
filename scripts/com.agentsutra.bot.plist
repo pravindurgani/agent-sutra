@@ -1,29 +1,33 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template plist — install_service.sh replaces __PYTHON__, __PROJECT__,
+  __HOME__, and __PYENV_BIN__ with actual paths at install time.
+-->
 <plist version="1.0">
 <dict>
     <key>Label</key>
     <string>com.agentsutra.bot</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/agentruntime1/.pyenv/versions/3.11.9/bin/python3</string>
-        <string>/Users/agentruntime1/Desktop/AgentSutra/main.py</string>
+        <string>__PYTHON__</string>
+        <string>__PROJECT__/main.py</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>/Users/agentruntime1/Desktop/AgentSutra</string>
+    <string>__PROJECT__</string>
     <key>KeepAlive</key>
     <true/>
     <key>ThrottleInterval</key>
     <integer>30</integer>
     <key>StandardOutPath</key>
-    <string>/Users/agentruntime1/Library/Logs/agentsutra/stdout.log</string>
+    <string>__HOME__/Library/Logs/agentsutra/stdout.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/agentruntime1/Library/Logs/agentsutra/stderr.log</string>
+    <string>__HOME__/Library/Logs/agentsutra/stderr.log</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/Users/agentruntime1/.pyenv/versions/3.11.9/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <string>__PYENV_BIN__:/usr/local/bin:/usr/bin:/bin</string>
     </dict>
 </dict>
 </plist>

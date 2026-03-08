@@ -441,8 +441,7 @@ _CODE_BLOCKED_PATTERNS = [
     # A-4: dynamic code bypasses all static scanning
     (re.compile(r"(?<!\w)exec\s*\("), "dynamic code via exec()"),
     (re.compile(r"(?<!\w)eval\s*\("), "dynamic code via eval()"),
-    # A-5: subprocess.* methods
-    (re.compile(r"\bsubprocess\.\w+\s*\("), "subprocess call"),
+    # A-5: subprocess.* — moved to AST-based _is_safe_subprocess() check in _check_code_safety()
     # A-6: Runtime string construction / obfuscation
     (re.compile(r"\bgetattr\s*\(\s*os\b"), "getattr on os module"),
     (re.compile(r"\bbase64\.\w*decode\s*\("), "base64 decode"),
@@ -490,6 +489,60 @@ def _resolve_constant_strings(code: str) -> list[str]:
     return resolved
 
 
+# 6A: Safe subprocess commands — AST-inspected instead of blanket blocking
+_SUBPROCESS_SAFE_CMDS = {"pip", "pip3", "python", "python3", "ollama", "git",
+                         "ls", "cat", "echo", "npm", "node", "head", "tail", "wc"}
+_SUBPROCESS_DANGEROUS_ARGS = {
+    "git": {"push", "push --force", "remote"},
+    "rm": set(),  # rm not in safe list, but belt-and-braces
+}
+
+
+def _is_safe_subprocess(code: str) -> bool:
+    """True if ALL subprocess calls use commands from the safe list.
+
+    Also checks secondary arguments: git is safe but git push is audit-logged.
+
+    Args:
+        code: Python source code to inspect.
+
+    Returns:
+        True if all subprocess calls are safe, False otherwise.
+    """
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return False
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if not (isinstance(func, ast.Attribute)
+                and isinstance(func.value, ast.Name)
+                and func.value.id == "subprocess"):
+            continue
+        if not node.args:
+            return False
+        first = node.args[0]
+        if isinstance(first, ast.List) and first.elts:
+            cmd = first.elts[0]
+            if isinstance(cmd, ast.Constant) and isinstance(cmd.value, str):
+                name = Path(cmd.value).name
+                if name not in _SUBPROCESS_SAFE_CMDS:
+                    return False
+                # Secondary arg check for dangerous subcommands
+                dangerous = _SUBPROCESS_DANGEROUS_ARGS.get(name)
+                if dangerous and len(first.elts) > 1:
+                    arg2 = first.elts[1]
+                    if isinstance(arg2, ast.Constant) and arg2.value in dangerous:
+                        logger.info("AUDIT: subprocess %s %s detected", name, arg2.value)
+                        # Don't block — just log (Tier 3 behavior)
+                continue
+            return False  # Non-string command element
+        return False  # Dynamic command — can't verify
+    return True
+
+
 def _check_code_safety(code: str) -> str | None:
     """Scan Python code content for dangerous operations. Returns error message or None.
 
@@ -504,6 +557,11 @@ def _check_code_safety(code: str) -> str | None:
     for pattern, label in _CODE_BLOCKED_PATTERNS:
         if pattern.search(code):
             return f"BLOCKED: Code contains {label}. Refusing to execute in subprocess mode."
+
+    # 6A: Smart subprocess check — AST-inspect arguments instead of blanket block
+    if re.search(r"\bsubprocess\.\w+\s*\(", code):
+        if not _is_safe_subprocess(code):
+            return "BLOCKED: Code contains subprocess call with unsafe or dynamic command."
 
     # Scan full code text against Tier 1 shell blocklist.
     # Catches Python that writes .sh files with dangerous content (cat|bash, sudo),

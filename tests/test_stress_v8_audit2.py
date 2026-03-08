@@ -129,7 +129,7 @@ class TestPhase1_CodeScannerEvasionDeep:
 
     def test_document_pattern_coverage(self):
         """All major evasion patterns now covered after A-4/A-5/A-6 (v8.5.2)."""
-        from tools.sandbox import _CODE_BLOCKED_PATTERNS
+        from tools.sandbox import _CODE_BLOCKED_PATTERNS, _is_safe_subprocess
 
         patterns = [(p.pattern, label) for p, label in _CODE_BLOCKED_PATTERNS]
 
@@ -139,14 +139,14 @@ class TestPhase1_CodeScannerEvasionDeep:
         has_dunder_import_pattern = any("__import__" in p for p, _ in patterns)
         has_getattr_pattern = any("getattr" in p for p, _ in patterns)
         has_exec_pattern = any("exec" in p for p, _ in patterns)
-        has_subprocess_pattern = any("subprocess" in p for p, _ in patterns)
 
         assert has_importlib_pattern, "importlib pattern must exist (S-2 fix)"
         assert has_dunder_import_pattern, "dunder-import pattern must exist (S-2 fix)"
         assert has_chr_obfuscation_pattern, "chr() chain pattern must exist (A-6 fix)"
         assert has_getattr_pattern, "getattr(os,...) pattern must exist (A-6 fix)"
         assert has_exec_pattern, "exec() pattern must exist (A-4 fix)"
-        assert has_subprocess_pattern, "subprocess pattern must exist (A-5 fix)"
+        # A-5: subprocess moved from static pattern to AST-based _is_safe_subprocess (6A)
+        assert callable(_is_safe_subprocess), "subprocess AST check must exist (A-5/6A)"
 
 
 class TestPhase1_ShellBlocklistDeepVectors:

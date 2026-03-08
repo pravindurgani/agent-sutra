@@ -172,7 +172,11 @@ def _call_ollama(prompt: str, system: str, model: str, max_tokens: int) -> str:
             timeout=120,
         )
         response.raise_for_status()
-        return response.json().get("message", {}).get("content", "")
+        content = response.json().get("message", {}).get("content", "")
+        # Strip reasoning model thinking blocks (e.g. DeepSeek R1)
+        if "<think>" in content and "</think>" in content:
+            content = content.split("</think>", 1)[-1].strip()
+        return content
     except requests.HTTPError as e:
         if e.response is not None and e.response.status_code == 404:
             logger.warning("Ollama /api/chat returned 404, falling back to /api/generate")
@@ -196,4 +200,8 @@ def _call_ollama_generate(prompt: str, system: str, model: str, max_tokens: int)
         timeout=120,
     )
     response.raise_for_status()
-    return response.json().get("response", "")
+    content = response.json().get("response", "")
+    # Strip reasoning model thinking blocks (e.g. DeepSeek R1)
+    if "<think>" in content and "</think>" in content:
+        content = content.split("</think>", 1)[-1].strip()
+    return content

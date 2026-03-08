@@ -106,7 +106,7 @@ Cross-model adversarial auditing: Sonnet generates, Opus reviews.
 | `MAX_CONCURRENT_TASKS` | 3 | Parallel pipeline limit |
 | `RAM_THRESHOLD_PERCENT` | 90 | Reject tasks above this |
 | `MAX_FILE_INJECT_COUNT` | 50 | Max project files for dynamic injection |
-| `OLLAMA_DEFAULT_MODEL` | `llama3.1:8b` | Local model for low-complexity offload |
+| `OLLAMA_DEFAULT_MODEL` | `deepseek-r1:14b` | Local model for low-complexity offload |
 | `SERVER_START_TIMEOUT` | 30s | Max wait for server HTTP response |
 | `SERVER_MAX_LIFETIME` | 300s | Auto-kill servers after this |
 | `SERVER_PORT_RANGE_START` | 8100 | Port range for dev servers |
@@ -257,3 +257,11 @@ Format:
 <!-- session ended: 2026-03-08 00:53 -->
 
 <!-- session ended: 2026-03-08 00:58 -->
+
+<!-- session ended: 2026-03-08 00:59 -->
+
+<!-- session ended: 2026-03-08 01:07 -->
+
+<!-- session ended: 2026-03-08 01:12 -->
+
+<!-- session ended: 2026-03-08 01:19 -->

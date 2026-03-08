@@ -323,7 +323,7 @@ class TestInjectProjectFilesRAG:
             with patch.object(config, "RAG_ENABLED", True):
                 with patch("tools.rag.build_index", side_effect=Exception("Ollama down")):
                     from brain.nodes.planner import _inject_project_files
-                    result = _inject_project_files(state, "base prompt")
+                    _inject_project_files(state, "base prompt")
 
                     # Should have fallen back to legacy selector
                     mock_claude.call.assert_called_once()
@@ -346,7 +346,7 @@ class TestInjectProjectFilesRAG:
 
             with patch.object(config, "RAG_ENABLED", False):
                 from brain.nodes.planner import _inject_project_files
-                result = _inject_project_files(state, "base prompt")
+                _inject_project_files(state, "base prompt")
 
                 # RAG should not have been attempted
                 mock_claude.call.assert_called_once()

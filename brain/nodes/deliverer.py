@@ -22,6 +22,20 @@ _CREDENTIAL_RE = [
 ]
 
 
+def _sanitize_paths(text: str) -> str:
+    """Replace production paths with generic equivalents in delivery messages.
+
+    Args:
+        text: The delivery message text.
+
+    Returns:
+        Text with absolute user paths and hostnames replaced.
+    """
+    text = re.sub(r'/Users/\w+/', '~/', text)
+    text = re.sub(r'\bAdmin\.local\b', '<hostname>', text)
+    return text
+
+
 def _has_credential_patterns(path: Path) -> bool:
     """Check if a text artifact contains credential-shaped strings.
 
@@ -201,6 +215,9 @@ Files generated: {', '.join(Path(f).name for f in artifacts if Path(f).exists())
         summary = summary[:config.TELEGRAM_MAX_MESSAGE_LENGTH - 200] + "\n\n(truncated)"
 
     _write_debug_sidecar(state)
+
+    # 8A: Sanitise production paths in the Telegram delivery message only
+    summary = _sanitize_paths(summary)
 
     return {"final_response": summary, "artifacts": artifacts, "deploy_url": deploy_url}
 

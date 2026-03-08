@@ -1155,3 +1155,45 @@ if y > 0:
 print("done")
 '''
         assert _detect_truncation(code) is False
+
+
+# ── 8A: Path sanitisation in delivery ──────────────────────────────
+
+
+class TestPathSanitisation:
+    """_sanitize_paths should replace production paths in delivery messages."""
+
+    def test_replaces_users_path(self):
+        """Absolute /Users/<name>/ paths replaced with ~/."""
+        from brain.nodes.deliverer import _sanitize_paths
+        text = "File saved to /Users/agentruntime1/Desktop/output.csv"
+        assert _sanitize_paths(text) == "File saved to ~/Desktop/output.csv"
+
+    def test_replaces_different_usernames(self):
+        """Works for any macOS username, not just agentruntime1."""
+        from brain.nodes.deliverer import _sanitize_paths
+        text = "See /Users/pravin/projects/report.html"
+        assert _sanitize_paths(text) == "See ~/projects/report.html"
+
+    def test_replaces_hostname(self):
+        """Admin.local hostname replaced with <hostname>."""
+        from brain.nodes.deliverer import _sanitize_paths
+        text = "Running on Admin.local port 8100"
+        assert _sanitize_paths(text) == "Running on <hostname> port 8100"
+
+    def test_preserves_non_matching_text(self):
+        """Text without paths or hostnames is unchanged."""
+        from brain.nodes.deliverer import _sanitize_paths
+        text = "Task completed. 3 files generated."
+        assert _sanitize_paths(text) == text
+
+    def test_multiple_replacements(self):
+        """Multiple paths and hostname in same message all replaced."""
+        from brain.nodes.deliverer import _sanitize_paths
+        text = "Saved /Users/agentruntime1/out.csv and /Users/agentruntime1/log.txt on Admin.local"
+        result = _sanitize_paths(text)
+        assert "/Users/" not in result
+        assert "Admin.local" not in result
+        assert "~/out.csv" in result
+        assert "~/log.txt" in result
+        assert "<hostname>" in result

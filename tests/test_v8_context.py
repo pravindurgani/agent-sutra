@@ -388,3 +388,45 @@ class TestDynamicFileInjection:
 
         assert result == "BASE SYSTEM"  # Falls back gracefully
         assert any("parse failure" in r.message.lower() for r in caplog.records)
+
+
+class TestPlannerRefusalDetection:
+    """Planner should set was_refused flag on security refusal plans."""
+
+    @patch("brain.nodes.planner.route_and_call", return_value="I cannot execute this task. rm -rf ~/ would delete files.")
+    def test_planner_sets_refused_flag_on_refusal(self, _mock_route: object) -> None:
+        """Plan starting with 'I cannot' sets was_refused=True."""
+        from brain.nodes.planner import plan
+        state = {
+            "task_id": "test-refuse",
+            "user_id": 1,
+            "message": "rm -rf ~/",
+            "files": [],
+            "task_type": "code",
+            "project_name": "",
+            "project_config": {},
+            "audit_feedback": "",
+            "execution_result": "",
+            "conversation_context": "",
+        }
+        result = plan(state)
+        assert result["was_refused"] is True
+
+    @patch("brain.nodes.planner.route_and_call", return_value="1. Read the CSV file\n2. Compute statistics\n3. Output results")
+    def test_planner_does_not_set_refused_on_normal_plan(self, _mock_route: object) -> None:
+        """Normal plan does not set was_refused."""
+        from brain.nodes.planner import plan
+        state = {
+            "task_id": "test-normal",
+            "user_id": 1,
+            "message": "Analyse data.csv",
+            "files": [],
+            "task_type": "code",
+            "project_name": "",
+            "project_config": {},
+            "audit_feedback": "",
+            "execution_result": "",
+            "conversation_context": "",
+        }
+        result = plan(state)
+        assert result["was_refused"] is False

@@ -1071,6 +1071,7 @@ async def cmd_chain(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     base_id = str(uuid.uuid4())[:8]
     previous_artifacts: list[str] = []
+    refused_count = 0
 
     await update.message.reply_text(
         f"Starting chain: {len(steps)} steps\n"
@@ -1171,6 +1172,9 @@ async def cmd_chain(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         previous_artifacts = result.get("artifacts", [])
 
+        if result.get("was_refused", False):
+            refused_count += 1
+
         # Send step result
         response_text = result.get("final_response", "Step completed.")
         await _send_long_message(update, f"Step {i+1}: {response_text}")
@@ -1186,9 +1190,14 @@ async def cmd_chain(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     pass
     else:
         # All steps completed
-        await update.message.reply_text(
-            f"Chain complete - all {len(steps)} steps passed."
-        )
+        if refused_count > 0:
+            await update.message.reply_text(
+                f"Chain complete - {refused_count}/{len(steps)} steps refused by security policy."
+            )
+        else:
+            await update.message.reply_text(
+                f"Chain complete - all {len(steps)} steps passed."
+            )
 
 
 @auth_required

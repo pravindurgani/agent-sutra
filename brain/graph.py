@@ -132,6 +132,7 @@ def run_task(
         "stage_timings": [],
         "server_url": "",
         "deploy_url": "",
+        "was_refused": False,
     }
 
     logger.info("Starting agent pipeline for task %s", task_id)

@@ -53,6 +53,9 @@ class AgentState(TypedDict):
     # Deployment
     deploy_url: str  # Live URL if deployed, empty string otherwise
 
+    # Refusal tracking (set by planner when task is refused on policy grounds)
+    was_refused: bool
+
     # Output
     final_response: str
     artifacts: list[str]  # file paths to send back

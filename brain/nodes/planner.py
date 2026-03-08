@@ -268,7 +268,17 @@ def plan(state: AgentState) -> dict:
         max_tokens=3000, thinking=use_thinking,
     )
     logger.info("Plan created for task %s (type=%s, %d chars, thinking=%s)", state["task_id"], task_type, len(response), use_thinking)
-    return {"plan": response}
+
+    # Detect planner refusals (security policy, credential file requests, etc.)
+    plan_lower = response.strip().lower()[:100]
+    was_refused = any(plan_lower.startswith(p) for p in [
+        "i cannot", "i can't", "i'm unable", "this task cannot",
+        "this request", "i will not", "i won't",
+    ])
+    if was_refused:
+        logger.info("Planner refused task: %.80s", response.strip())
+
+    return {"plan": response, "was_refused": was_refused}
 
 
 # ── Dynamic file injection for project tasks ─────────────────────────

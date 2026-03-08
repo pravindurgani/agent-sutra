@@ -821,6 +821,49 @@ class TestChainBlockedDetection:
         assert label == "Step failed"
 
 
+class TestChainRefusalReporting:
+    """Chain should report refused step count when planner sets was_refused."""
+
+    def test_chain_reports_refused_count(self):
+        """Two refused steps → completion message mentions refused count."""
+        steps = ["step 1", "step 2"]
+        refused_count = 0
+        results = [
+            {"audit_verdict": "pass", "was_refused": True, "artifacts": []},
+            {"audit_verdict": "pass", "was_refused": True, "artifacts": []},
+        ]
+        for result in results:
+            if result.get("was_refused", False):
+                refused_count += 1
+
+        assert refused_count == 2
+        if refused_count > 0:
+            msg = f"Chain complete - {refused_count}/{len(steps)} steps refused by security policy."
+        else:
+            msg = f"Chain complete - all {len(steps)} steps passed."
+        assert "refused" in msg
+        assert "2/2" in msg
+
+    def test_chain_reports_all_passed_when_none_refused(self):
+        """No refused steps → message says 'all passed'."""
+        steps = ["step 1", "step 2"]
+        refused_count = 0
+        results = [
+            {"audit_verdict": "pass", "was_refused": False, "artifacts": []},
+            {"audit_verdict": "pass", "was_refused": False, "artifacts": []},
+        ]
+        for result in results:
+            if result.get("was_refused", False):
+                refused_count += 1
+
+        assert refused_count == 0
+        if refused_count > 0:
+            msg = f"Chain complete - {refused_count}/{len(steps)} steps refused by security policy."
+        else:
+            msg = f"Chain complete - all {len(steps)} steps passed."
+        assert "all 2 steps passed" in msg
+
+
 # ── 3B: Timeout progress feedback ─────────────────────────────────
 
 

@@ -137,8 +137,9 @@ class TestCodingStandardsInjection:
             "retry_count": 0,
         }
 
+    @patch("tools.model_router._ollama_available", return_value=False)
     @patch("brain.nodes.planner.claude_client.call")
-    def test_standards_injected_for_code_task(self, mock_call):
+    def test_standards_injected_for_code_task(self, mock_call, _mock_ollama):
         """A 'code' task should include standards in the system prompt."""
         mock_call.return_value = "1. Do the thing"
 
@@ -225,8 +226,9 @@ class TestCodingStandardsInjection:
             elif standards_file.exists():
                 standards_file.unlink()
 
+    @patch("tools.model_router._ollama_available", return_value=False)
     @patch("brain.nodes.planner.claude_client.call")
-    def test_standards_skipped_when_file_missing(self, mock_call):
+    def test_standards_skipped_when_file_missing(self, mock_call, _mock_ollama):
         """No standards file → no injection, no error."""
         mock_call.return_value = "1. Do the thing"
 

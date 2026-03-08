@@ -98,8 +98,21 @@ def start_server(
     """
     if port is None:
         port = _find_free_port()
+    else:
+        # 1B: Check if explicit port is available
+        import socket
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(("127.0.0.1", port))
+            except OSError:
+                logger.warning("Port %d in use, finding free port", port)
+                port = _find_free_port()
 
     resolved_cmd = command.replace("{port}", str(port))
+
+    # 1A: Bind to localhost to bypass macOS firewall dialog
+    if "http.server" in resolved_cmd and "--bind" not in resolved_cmd:
+        resolved_cmd = resolved_cmd.replace("http.server", "http.server --bind 127.0.0.1")
 
     # A-1: Safety check server commands through Tier 1 blocklist
     safety_msg = _check_command_safety(resolved_cmd)
@@ -238,6 +251,8 @@ def _wait_for_http(port: int, timeout: int) -> bool:
         except Exception:
             pass
         time.sleep(0.5)
+    # 1D: Log health check failure details
+    logger.warning("Health check failed: port %d did not return HTTP 200 within %ds", port, timeout)
     return False
 
 

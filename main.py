@@ -152,6 +152,12 @@ def main():
     cleanup_workspace_files()
     logger.info("Storage cleanup completed")
 
+    # 1C: Kill orphaned servers from previous crash
+    from tools.sandbox import stop_all_servers
+    stopped = stop_all_servers()
+    if stopped:
+        logger.info("Cleaned up %d orphaned server(s)", stopped)
+
     # Bootstrap shared project venv (for projects without their own venv: key)
     _ensure_shared_project_venv()
 

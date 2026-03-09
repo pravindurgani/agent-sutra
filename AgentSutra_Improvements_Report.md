@@ -1,8 +1,10 @@
-# AgentSutra — Improvements Report v3
+# AgentSutra — Improvements Report v4
 
 *Based on analysis of 30,747 lines of production logs (Mar 02-08 2026), 96 pipeline output artifacts from the Ultimate Test Suite, and 377 Telegram messages from the @agentruntime1_bot chat export.*
 
 *All numerical claims fact-checked against raw log data. Corrections from v2 noted inline.*
+
+*v4 update (2026-03-08): Added Part 9 — v8.7.0 Post-Production Audit findings, source-verified against codebase. Updated status markers on items fixed in v8.7.0.*
 
 ---
 
@@ -77,7 +79,7 @@ Every failure: `"Server on port 8100 did not respond within 30s"`. The server ru
 
 ---
 
-### 1.3 Code Scanner Bypass -- Confirmed, Audit Gate Did NOT Catch It
+### 1.3 Code Scanner Bypass -- Confirmed, Audit Gate Did NOT Catch It — FIXED v8.7.0
 
 **Evidence:** `telegram_bot_exports_logs_testsuite/write_a_bash_sysadmin_1c0cbc.py` + `sysadmin_maintenance.sh`
 
@@ -283,7 +285,7 @@ The biggest cost drivers are Sonnet output tokens (several single calls hit 76K-
 
 ## Part 4: Architectural Improvements
 
-### 4.1 Code Truncation -- 9 Errors (CONFIRMED)
+### 4.1 Code Truncation -- 9 Errors (CONFIRMED) — PARTIALLY FIXED v8.7.0, introduced regression F-1 (see Part 9)
 
 **Evidence:** 9 errors from truncated code generation:
 - 5x `unexpected EOF while parsing` (shell scripts piped to stdin)
@@ -301,7 +303,7 @@ The biggest cost drivers are Sonnet output tokens (several single calls hit 76K-
 
 ---
 
-### 4.2 RAG Context Layer -- Highest-Impact Architectural Change
+### 4.2 RAG Context Layer -- Highest-Impact Architectural Change — IMPLEMENTED v8.7.0
 
 **Evidence strengthened by Telegram chat:** The iGaming Intelligence Dashboard task failed with "Missing GEMINI_API_KEY" because the planner didn't understand the project's environment requirements. Two subsequent CLI invocations were wrong (`usage: run_pipeline.py`). 21 file selector JSON parse failures (section 1.5) mean file injection is failing silently even for the current dumb approach.
 
@@ -469,3 +471,155 @@ Remaining: the Stop hook in `.claude/settings.json` appends `<!-- session ended 
 **Recommended order:** 1.1 -> 1.4 -> 4.5 -> 3.2 -> 1.3 -> 3.1 -> 1.5 -> 1.2 -> 2.1 -> 2.3 -> 4.1 -> 4.3 -> 3.4 -> 2.2 -> 4.4 -> 4.2
 
 **Quick wins (under 30 min each):** 1.1 (server bind), 1.4 (Firebase PATH), 4.5 (Docker build), 3.2 ("Completed" -> "Processing"), 3.5 (/deploy HTML check), Stop hook fix. Total: ~2 hours for 6 fixes.
+
+---
+
+## Part 9: v8.7.0 Post-Production Audit (Source-Verified 2026-03-08)
+
+*Every claim below verified against the actual source code. Corrections to the original audit noted inline.*
+
+### 9.1 Critical: Shell Truncation False-Positive on Python (F-1)
+
+**Verified at:** `brain/nodes/executor.py:91-96`
+
+```python
+if_count = len(re.findall(r'\bif\b', stripped))
+fi_count = len(re.findall(r'\bfi\b', stripped))
+shell_truncated = (if_count > fi_count + 2) or (do_count > done_count + 1)
+```
+
+**Confirmed:** The `\bif\b` regex matches Python's `if` keyword. Python never uses `fi`, so any Python code with >2 `if` statements triggers `shell_truncated = True`. This caused 100% failure rate on the analytics.py task (shell_if counts: 19/0, 11/0, 8/0 across 3 attempts). Each false positive forced a re-generation with progressively shorter prompts ("under 200 lines" then "under 100 lines, no comments, no docstrings"), stripping requirements until the code was incomplete.
+
+**Cascade effect (F-2):** Truncation recovery produces incomplete code -> auditor correctly rejects -> retry re-plans from scratch -> hits F-1 again. 3 retry cycles x 9 API calls = ~$5+ wasted per task, all failing identically.
+
+**Priority:** P0 — fix before any further testing.
+
+**Recommended fix (refined from audit):** The audit suggests checking first 10 lines for `def`/`import`/`class`. A more robust approach: only apply 7D shell if/fi and do/done checks when the code starts with a shell shebang (`#!/bin/bash`, `#!/bin/sh`, `#!/usr/bin/env bash/sh`). If no shebang, skip shell truncation checks entirely. This avoids false negatives on Python scripts starting with comments/docstrings.
+
+**Test needed:** `test_detect_truncation_python_with_many_ifs_not_truncated` — Python code with 20 `if` statements returns `False`.
+
+---
+
+### 9.2 Medium: /cost Model Name Display (F-3)
+
+**Verified at:** `tools/claude_client.py:373`
+
+```python
+short = model.split("-")[-1] if "-" in model else model
+```
+
+On `claude-sonnet-4-6`: `split("-")` produces `["claude", "sonnet", "4", "6"]`, `[-1]` = `"6"`. Displayed as "6: $30.59 (100%)" — meaningless.
+
+*Note: The original audit rated this "High" in the executive summary but "Medium" in the failure table. Correct severity is Medium — purely cosmetic, data is accurate.*
+
+**Fix:** `model.replace("claude-", "").rsplit("-", 1)[0]` produces `"sonnet-4"` from `claude-sonnet-4-6`. Verified.
+
+---
+
+### 9.3 Medium: Budget/Ollama Interaction (F-4, F-5)
+
+**Verified at:** `tools/model_router.py:40-54` (Ollama fallback) and `:80-82` (budget escalation)
+
+**F-4:** After Ollama empty responses (2 retries, ~53s), falls back to Claude at line 54. No budget pre-check before the Claude call — `_check_budget()` fires inside `claude_client.call()` and raises `BudgetExceededError`. User wasted 55s getting nothing.
+
+**F-5:** Budget escalation at line 80 routes to Ollama regardless of complexity:
+```python
+if purpose in ("classify", "plan") and _daily_spend_exceeds_threshold(0.7):
+    if _ollama_available() and _ram_below_threshold(90):
+        return ("ollama", config.OLLAMA_DEFAULT_MODEL)
+```
+No `complexity` check — even `complexity="high"` plans go to Ollama under budget pressure. Ollama times out (120s) on complex prompts, wasting 2 minutes before falling back to Claude anyway.
+
+**Fix P1-2 (verified correct):** Add `and complexity != "high"` to line 80 condition. High-complexity tasks should never route to Ollama.
+
+---
+
+### 9.4 Medium: Inconsistent Cost Defaults
+
+**Verified at:**
+- `tools/model_router.py:148` — `_MODEL_COSTS.get(model, {"input": 3.00, "output": 15.00})`
+- `tools/claude_client.py:119` — `MODEL_COSTS.get(model_name, {"input": 15.00, "output": 75.00})`
+- `tools/claude_client.py:367` — same expensive default
+
+The router's `_get_today_spend()` uses cheap defaults (3.00/15.00) for unknown models, while `_check_budget()` and `get_cost_summary()` use expensive defaults (15.00/75.00). If a new model appears, the router's threshold check under-counts spend while the budget enforcement over-counts — could trigger budget exceeded on a seemingly under-threshold day.
+
+**Fix:** Harmonise `_get_today_spend()` default to `{"input": 15.00, "output": 75.00}` to match the budget check.
+
+---
+
+### 9.5 Fragility Analysis — Audit Corrections
+
+**CORRECTION — Subprocess allowlist claim is WRONG:** The audit states `subprocess.run(["cp", "/etc/shadow", "/tmp/"])` passes because `cp` is on the allowlist. **This is incorrect.** The actual allowlist at `sandbox.py:493-494` is:
+```python
+_SUBPROCESS_SAFE_CMDS = {"pip", "pip3", "python", "python3", "ollama", "git",
+                         "ls", "cat", "echo", "npm", "node", "head", "tail", "wc"}
+```
+`cp` and `mv` are NOT on this list. `subprocess.run(["cp", ...])` would be blocked by `_is_safe_subprocess()`. The audit's "medium likelihood" rating for this scenario is wrong — the scenario cannot occur.
+
+**CONFIRMED — RAG zero-vector poisoning:** At `rag.py:167-169`, embedding failures pad with zero vectors to keep indices aligned. These zero-vector chunks would pollute query results. Verified — no filtering of zero-vector results on query.
+
+**CONFIRMED — max_tokens/thinking interplay:** At `claude_client.py:187-188`, `max_tokens` is floored to 128000 when thinking is enabled. So `max_tokens=8192` in executor code gen (executor.py:556) has no effect — the model gets 128000 tokens total budget for thinking+text combined. Low practical impact (model handles allocation well).
+
+**GARBLED TEXT — P2-3 fix:** The audit's P2-3 recommendation text is truncated/garbled. The intended fix for Linux path sanitisation is: `re.sub(r'/(Users|home)/\w+/', '~/', text)` — extending the existing macOS-only regex at `deliverer.py:34`.
+
+---
+
+### 9.6 Credential Filter Gaps (Verified)
+
+**Verified at:** `brain/nodes/deliverer.py:17-22`
+
+Missing patterns (confirmed absent):
+- `sk-ant-api*` (Anthropic API keys)
+- `xoxb-*` (Slack bot tokens)
+- Telegram bot tokens (`[0-9]{8,10}:[A-Za-z0-9_-]{35}`)
+
+**Verified at:** `brain/nodes/deliverer.py:48`
+
+Credential scan only covers `.log`, `.txt`, `.json`, `.yaml`, `.yml`, `.csv`. Missing `.py`, `.html`, `.js` — a generated Python file containing a hardcoded API key would pass through.
+
+---
+
+### 9.7 Updated Priority Matrix (v8.7.0)
+
+Items marked with status reflect v8.7.0 changes.
+
+| Priority | Item | Impact | Effort | Status |
+|----------|------|--------|--------|--------|
+| **P0** | 9.1 Shell truncation false-positive (F-1) | Critical | 1 hour | NEW — blocks all Python code gen |
+| **P0** | 9.2 /cost model name display (F-3) | Medium | 15 min | NEW — cosmetic but confusing |
+| **P0** | 1.1 Preview server (--bind 127.0.0.1) | Critical | 30 min | Open |
+| **P0** | 1.4 Firebase PATH | Critical | 15 min | Open |
+| **~~P0~~** | ~~1.3 Code scanner bypass~~ | ~~Critical~~ | ~~4-6 hours~~ | **FIXED v8.7.0** (AST constant folding + written-file scanning) |
+| **P1** | 9.3 Budget escalation skips high-complexity (F-5) | Medium | 30 min | NEW |
+| **P1** | 9.4 Harmonise cost defaults | Low | 15 min | NEW |
+| **P1** | 9.6 Credential filter gaps (patterns + extensions) | Medium | 1-2 hours | NEW |
+| **P1** | 1.2 Stabilise Ollama routing | High | 2-3 hours | Open |
+| **P1** | 2.1 Data fabrication fix | High | 3-4 hours | Open |
+| **P1** | 2.3 False positive security blocks | High | 2-3 hours | Open |
+| **P1** | 3.1 Chain refusal status bug | High | 1-2 hours | Open |
+| **P1** | 1.5 File selector parse failures | High | 1-2 hours | Open |
+| **P2** | RAG zero-vector poisoning guard | Medium | 1-2 hours | NEW |
+| **P2** | 4.1 Code truncation (remaining non-7D issues) | Medium | 2-3 hours | Partially fixed v8.7.0 |
+| **P2** | 4.3 Over-generation limits | Medium | 1-2 hours | Open |
+| **P2** | 3.2 "Completed" -> "Processing" | Medium | 15 min | Open |
+| **P2** | 3.4 Timeout progress feedback | Medium | 2-3 hours | Open |
+| **P2** | 2.2 Path sanitization + Linux paths | Medium | 1-2 hours | Open |
+| **P2** | 4.4 Log quality | Medium | 1-2 hours | Open |
+| **~~P3~~** | ~~4.2 RAG context layer~~ | ~~Critical~~ | ~~2 days~~ | **IMPLEMENTED v8.7.0** |
+
+**Recommended next session order:** 9.1 (F-1 shell truncation) -> 9.2 (cost display) -> 1.1 (server bind) -> 1.4 (Firebase PATH) -> 9.3 (budget escalation) -> 9.4 (cost defaults) -> 9.6 (credential patterns) -> re-run analytics.py to validate
+
+---
+
+### 9.8 Strengths Confirmed by v8.7.0 Production Data
+
+- **Security blocklist holds.** Zero bypasses across 515+ API calls. AST constant folding (v8.7.0) now catches string concatenation evasion.
+- **Adversarial audit catches real failures.** Opus correctly rejected incomplete analytics.py code despite "ALL ASSERTIONS PASSED" in execution output. Did not rubber-stamp.
+- **Environment error short-circuit saves money.** Task 25fb9bf6 timed out at 300s -> auditor detected env error -> set retry_count to MAX_RETRIES -> skipped futile cycles.
+- **Graceful degradation holds.** 40+ Ollama failures (Mar 6) and 5+ (Mar 8) all fell back to Claude without crashing. No unhandled exceptions.
+
+### 9.9 Limitations Discovered
+
+- **Shell truncation detection breaks Python** (F-1). The if/fi heuristic (7D) causes false positives on every non-trivial Python file. This made all code-generation tasks fail in the latest session. Workaround: none until P0-1 fix.
+- **Retry loop doesn't learn.** Audit feedback goes to executor but not planner. Planner re-plans from scratch, potentially repeating the same structural mistakes.
+- **Ollama unreliable under load.** Empty responses, 120s timeouts, 404s all observed. Budget escalation makes this worse by routing complex prompts to Ollama.

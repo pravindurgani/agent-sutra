@@ -57,7 +57,7 @@ Failed audits retry up to 3 times with traceback injection.
 | **Task Chaining** | `/chain step 1 -> step 2 -> step 3` with strict-AND semantics. Failed step halts the chain. `{output}` passes artifacts between steps. |
 | **Schedule & Forget** | APScheduler with SQLite persistence. `/schedule 1440 Daily briefing` — survives reboots. |
 | **Cross-Task Memory** | Project tasks store success/failure patterns. The planner injects lessons learned to prevent repeated failures. |
-| **Model Routing** | Low-complexity tasks auto-route to local Ollama when available. Budget escalation at 70% daily spend. Audit always stays on Opus. |
+| **Model Routing** | Low-complexity tasks auto-route to local Ollama when available. Budget escalation at 70% daily spend (skips high-complexity tasks). Audit always stays on Opus. |
 | **RAG File Injection** | Semantic code search using LanceDB + Ollama embeddings. AST-aware Python chunking at function/class boundaries. Replaces random file sampling for project tasks. `/reindex` to refresh. |
 | **Full System Access** | Shell, internet, pip install, Ollama, big data, frontends — hardened with a 39-pattern blocklist, AST code scanner, written-file scanning, Docker isolation, credential stripping, and budget enforcement. |
 
@@ -160,7 +160,7 @@ AgentSutra/
 ├── config.py                # All config from .env
 ├── brain/
 │   ├── graph.py             # LangGraph state machine
-│   ├── state.py             # Pipeline state (23 fields)
+│   ├── state.py             # Pipeline state (24 fields)
 │   └── nodes/
 │       ├── classifier.py    # Routes to 1 of 7 task types
 │       ├── planner.py       # Generates execution plan

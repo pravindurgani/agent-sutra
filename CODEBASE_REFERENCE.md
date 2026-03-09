@@ -4,7 +4,7 @@ Every folder, file, and configuration in the AgentSutra project — what it is, 
 
 **Generated:** 2026-02-24 (v8.0.0 baseline)
 
-> **Note:** This reference was written at v8.0.0. Versions 8.1.0–8.7.0 added: `tools/deployer.py` (static deployment), `tools/visual_check.py` (Playwright verification), `tools/rag.py` (RAG context layer with LanceDB + Ollama embeddings), server management in `tools/sandbox.py`, `/deploy`, `/servers`, `/stopserver`, `/reindex` commands, `server_url` and `deploy_url` in AgentState, Firebase Hosting support, visual check context in the auditor, Tier 1+ code/script scanning, AST constant folding scanner, smart subprocess allowlist, written-file scanning, truncation detection (Python + shell), fabrication detection, chain strict-AND gate with BLOCKED detection, anti-fabrication hardening (file ref validation, credential filter, path sanitisation), comprehensive third-pass security hardening (37 fixes), Ollama stabilisation (empty response retry, startup inference test), partial result preservation (`task_state`/`last_completed_stage` in DB), cost analytics with 7-day breakdown, `/retry` and `/setup` commands, budget >80% warning, temporal window expansion (30min→2hr), Justfile, pre-commit hooks, GitHub Actions CI, and launchd service. See [AGENTSUTRA.md changelog](AGENTSUTRA.md#changelog) for full details.
+> **Note:** This reference was written at v8.0.0. Versions 8.1.0–8.8.0 added: `tools/deployer.py` (static deployment), `tools/visual_check.py` (Playwright verification), `tools/rag.py` (RAG context layer with LanceDB + Ollama embeddings), server management in `tools/sandbox.py`, `/deploy`, `/servers`, `/stopserver`, `/reindex` commands, `server_url` and `deploy_url` in AgentState, Firebase Hosting support, visual check context in the auditor, Tier 1+ code/script scanning, AST constant folding scanner, smart subprocess allowlist, written-file scanning, truncation detection (Python + shell), fabrication detection, chain strict-AND gate with BLOCKED detection, anti-fabrication hardening (file ref validation, credential filter, path sanitisation), comprehensive third-pass security hardening (37 fixes), Ollama stabilisation (empty response retry, startup inference test), partial result preservation (`task_state`/`last_completed_stage` in DB), cost analytics with 7-day breakdown, `/retry` and `/setup` commands, budget >80% warning, temporal window expansion (30min→2hr), Justfile, pre-commit hooks, GitHub Actions CI, and launchd service. v8.8.0 added: shell truncation shebang-gated fix, credential filter expansion (Anthropic/Slack/Telegram patterns), budget escalation high-complexity guard, Ollama unclosed think-block handling, chain refusal tracking (`was_refused` field in AgentState), /deploy artifact fallback, path sanitisation for Linux, over-generation limits, RAG zero-vector index-time filtering, task completion log summary, timeout progress feedback with 80% warning, and file selector retry. See [AGENTSUTRA.md changelog](AGENTSUTRA.md#changelog) and [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) for full details.
 
 ---
 
@@ -34,10 +34,10 @@ Every folder, file, and configuration in the AgentSutra project — what it is, 
 
 AgentSutra is a self-hosted Telegram bot that receives natural language tasks, processes them through a 5-stage LangGraph pipeline (Classify → Plan → Execute → Audit → Deliver), and returns results. It runs on a Mac Mini M2 (16GB) for a single authenticated user.
 
-**Key numbers (v8.7.0):**
-- ~7,775 lines of application code across 21 source files
-- ~10,078 lines of test code across 25 test files
-- 737 total tests (726 passing, 11 skipped)
+**Key numbers (v8.8.0):**
+- ~7,876 lines of application code across 21 source files
+- ~10,808 lines of test code across 27 test files
+- 782 total tests (771 passing, 11 skipped)
 - 19 Telegram commands
 - 7 task types
 - 39 blocked command patterns (Tier 1 security) + full-text code scanning (Tier 1+) + 51 code scanner patterns (Tier 4/5)
@@ -72,7 +72,7 @@ AgentSutra is a self-hosted Telegram bot that receives natural language tasks, p
 - Parses environment variables for API keys, model names, timeouts, budget limits, Docker settings
 - Creates required directories on import (`mkdir(parents=True, exist_ok=True)`)
 - Defines `PROTECTED_ENV_KEYS` and `PROTECTED_ENV_SUBSTRINGS` for credential stripping from subprocess environments
-- `VERSION = "8.6.0"` — single source of truth for the version string
+- `VERSION = "8.8.0"` — single source of truth for the version string
 
 **Why this way:** All settings in one module means any file can `import config` and access everything. No scattered `os.getenv()` calls. The `_parse_user_ids()` helper handles malformed comma-separated IDs gracefully.
 
@@ -187,7 +187,7 @@ Package marker. Empty.
 
 **Why this way:** Separated from `handlers.py` to keep the wiring clean. The factory pattern makes it easy to see all registered handlers at a glance. File handlers are registered before the text handler because Telegram dispatches to the first matching handler.
 
-### `bot/handlers.py` (~1381 lines, 50 KB)
+### `bot/handlers.py` (~1474 lines, 53 KB)
 **Purpose:** All Telegram command handlers, message processing, authentication, and resource management.
 
 **What it does:**
@@ -218,10 +218,10 @@ The brain module implements the 5-stage LangGraph pipeline: Classify → Plan �
 ### `brain/__init__.py` (0 lines)
 Package marker.
 
-### `brain/state.py` (58 lines, 1.6 KB)
+### `brain/state.py` (61 lines, 1.7 KB)
 **Purpose:** Defines `AgentState` TypedDict — the single data structure that flows through the entire pipeline.
 
-**Fields (23 total):**
+**Fields (24 total):**
 | Field | Type | Set By |
 |-------|------|--------|
 | `task_id` | `str` | Handler |
@@ -247,11 +247,12 @@ Package marker.
 | `stage_timings` | `list[dict]` | Graph (v8) |
 | `server_url` | `str` | Executor (v8.2) |
 | `deploy_url` | `str` | Deliverer (v8.1) |
+| `was_refused` | `bool` | Planner (v8.8) |
 | `artifacts` | `list[str]` | Deliverer |
 
 **Why TypedDict:** LangGraph requires a typed state dict. TypedDict gives type checker support without runtime overhead. Each node function returns a partial dict that LangGraph merges into the state.
 
-### `brain/graph.py` (143 lines, 4.4 KB)
+### `brain/graph.py` (151 lines, 4.7 KB)
 **Purpose:** Wires the 5-stage pipeline using LangGraph's StateGraph and provides the `run_task()` entry point.
 
 **What it does:**
@@ -284,7 +285,7 @@ Package marker.
 
 **Why this way:** The two-tier approach (triggers first, then LLM) saves $0.01-0.03 per project task. The `_FALLBACK_ORDER` list is imported by tests to stay in sync. The classifier uses `route_and_call(purpose="classify", complexity="low")` (v8) so low-complexity classification can route to Ollama.
 
-### `brain/nodes/planner.py` (380 lines, 16 KB)
+### `brain/nodes/planner.py` (417 lines, 17 KB)
 **Purpose:** Generates an execution plan based on task type and context.
 
 **What it does:**
@@ -298,7 +299,7 @@ Package marker.
 
 **Why this way:** Task-type-specific prompts outperform a single generic prompt because each type has different audit criteria and output expectations. The memory injection enables cross-task learning: if the same project failed last time because of a missing venv, the planner knows to activate it this time.
 
-### `brain/nodes/executor.py` (743 lines, 28 KB)
+### `brain/nodes/executor.py` (827 lines, 31 KB)
 **Purpose:** Generates code from the plan and executes it in a sandbox.
 
 **What it does:**
@@ -317,7 +318,7 @@ Package marker.
 
 **Why this way:** The executor is the most complex node because it handles two fundamentally different execution modes (project commands vs. generated code). The auto-install loop for projects prevents burning pipeline retries on missing dependencies. The `_estimate_timeout()` function scales timeout based on task type and data size.
 
-### `brain/nodes/auditor.py` (305 lines, 12 KB)
+### `brain/nodes/auditor.py` (314 lines, 12 KB)
 **Purpose:** Cross-model adversarial quality review of execution output.
 
 **What it does:**
@@ -335,7 +336,7 @@ Package marker.
 
 **Why this way:** Using a DIFFERENT model (Opus) than the executor (Sonnet) is the core safety mechanism. The same model approving its own work creates an echo chamber. The balanced-brace JSON extractor handles cases where Claude wraps JSON in explanation text. The environment error short-circuit saves 9 API calls on unrecoverable failures.
 
-### `brain/nodes/deliverer.py` (376 lines, 14 KB)
+### `brain/nodes/deliverer.py` (430 lines, 16 KB)
 **Purpose:** Formats the final response for delivery back to the user via Telegram.
 
 **What it does:**
@@ -392,7 +393,7 @@ Package marker.
 
 **Why this way:** The threaded Popen refactor (v8) replaced `proc.communicate(timeout)` to enable line-by-line stdout capture for live streaming. The tiered security model is defense-in-depth: Tier 1 is the hard block, Tier 3 provides audit trail, Tier 4 is defense-in-depth for the subprocess path. Docker provides the actual filesystem isolation boundary.
 
-### `tools/rag.py` (309 lines, 11 KB) — NEW in v8.7
+### `tools/rag.py` (324 lines, 12 KB) — NEW in v8.7
 **Purpose:** RAG context layer for semantic project file injection using LanceDB + Ollama embeddings.
 
 **What it does:**
@@ -407,7 +408,7 @@ Package marker.
 
 ---
 
-### `tools/model_router.py` (213 lines, 7.2 KB) — NEW in v8
+### `tools/model_router.py` (222 lines, 7.5 KB) — NEW in v8
 **Purpose:** Routes LLM calls to Claude or Ollama based on purpose, complexity, RAM, and budget.
 
 **What it does:**
@@ -506,7 +507,7 @@ Package marker.
 
 ## tests/ — Test Suite
 
-737 tests across 25 files. 726 pass, 11 skip.
+782 tests across 27 files. 771 pass, 11 skip.
 
 ### Existing test files (pre-v8):
 

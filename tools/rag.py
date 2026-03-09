@@ -243,9 +243,24 @@ def build_index(project_name: str, project_path: Path) -> bool:
         logger.warning("Embedding count mismatch: %d vectors vs %d chunks", len(vectors), len(all_chunks))
         return False
 
+    # 11: Filter out zero-vector chunks (embedding failures padded with zeros).
+    # Zero vectors have undefined cosine similarity and unpredictable L2 distance
+    # (varies by query magnitude), so we exclude them at index time.
+    valid_entries = [
+        (chunk, vec) for chunk, vec in zip(all_chunks, vectors)
+        if any(v != 0.0 for v in vec)
+    ]
+    if len(valid_entries) < len(all_chunks):
+        dropped = len(all_chunks) - len(valid_entries)
+        logger.warning("Dropped %d zero-vector chunks from RAG index (embedding failures)", dropped)
+
+    if not valid_entries:
+        logger.warning("All embeddings failed for %s — skipping index build", project_name)
+        return False
+
     # Build LanceDB table
     records = []
-    for chunk, vec in zip(all_chunks, vectors):
+    for chunk, vec in valid_entries:
         records.append({
             "text": chunk["text"],
             "file_path": chunk["file_path"],

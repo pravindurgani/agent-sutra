@@ -1217,6 +1217,20 @@ async def cmd_deploy(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Find HTML artifacts matching the task ID prefix
     html_files = list(config.OUTPUTS_DIR.glob(f"*{task_id_prefix}*.html"))
+
+    # Fallback: check stored task artifacts (handles non-standard naming)
+    if not html_files:
+        task = await db.get_task_by_prefix(task_id_prefix)
+        if task and task.get("task_state"):
+            try:
+                state = json.loads(task["task_state"]) if isinstance(task["task_state"], str) else task["task_state"]
+                for artifact_path in state.get("artifacts", []):
+                    p = Path(artifact_path)
+                    if p.exists() and p.suffix == ".html":
+                        html_files.append(p)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
     if not html_files:
         await update.message.reply_text(
             f"No HTML artifacts found for '{task_id_prefix}'. "

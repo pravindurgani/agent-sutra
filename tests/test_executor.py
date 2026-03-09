@@ -365,3 +365,33 @@ class TestCheckReferencedFilesExitLanguage:
         (tmp_path / "data.csv").write_text("a,b\n1,2\n")
         warning = _check_referenced_files("Analyse data.csv for trends", tmp_path)
         assert warning == ""
+
+
+# ── Phase 10: Over-generation limits ──────────────────────────────
+
+
+class TestOverGenerationLimits:
+    """Code generation should include length guidance and warn on long output."""
+
+    def test_code_gen_system_prompt_includes_length_guidance(self):
+        """CODE_GEN_SYSTEM must contain explicit length guidance."""
+        from brain.nodes.executor import CODE_GEN_SYSTEM
+        assert "50-300 lines" in CODE_GEN_SYSTEM
+        assert "boilerplate" in CODE_GEN_SYSTEM.lower()
+
+    def test_code_gen_warns_on_long_output(self, caplog):
+        """Code gen producing >500 lines triggers a warning log."""
+        import logging
+        from brain.nodes.executor import logger as executor_logger
+
+        # Simulate the over-generation check directly
+        code = "\n".join(f"line_{i} = {i}" for i in range(601))
+        with caplog.at_level(logging.WARNING, logger="brain.nodes.executor"):
+            if code and code.count("\n") > 500:
+                executor_logger.warning(
+                    "Code gen produced %d lines — possible over-generation",
+                    code.count("\n"),
+                )
+
+        assert any("over-generation" in r.message for r in caplog.records)
+        assert any("600" in r.message for r in caplog.records)

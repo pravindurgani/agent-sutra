@@ -132,6 +132,11 @@ Rules:
 - Print "ALL ASSERTIONS PASSED" if all checks succeed
 - Handle errors gracefully with try/except
 
+LENGTH GUIDANCE:
+- Keep code concise. A typical task should produce 50-300 lines of code
+- Do NOT generate entire frameworks, full CSS libraries, or production boilerplate unless explicitly asked
+- If the task says 'simple' or 'basic', keep the code under 100 lines
+
 SYSTEM ACCESS:
 - Libraries are auto-installed if missing (do NOT install manually)
 - Download files via requests, httpx, or urllib
@@ -566,6 +571,9 @@ def _execute_code(state: AgentState) -> dict:
 
     code = claude_client.call(prompt, system=system, max_tokens=8192, thinking=True)
     code = _strip_markdown_blocks(code)
+
+    if code and code.count("\n") > 500:
+        logger.warning("Code gen produced %d lines — possible over-generation", code.count("\n"))
 
     if not code.strip():
         return {

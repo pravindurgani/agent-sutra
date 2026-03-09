@@ -1619,3 +1619,32 @@ class TestWrittenFileScanning:
         pre_existing = {str(sh_file)}
         result = _scan_written_files(tmp_path, pre_existing)
         assert result is None
+
+
+# ── Phase 8: False positive reproduction tests ─────────────────────
+
+
+class TestFalsePositiveReproduction:
+    """Confirmed false positives from production: mpmath, sys introspection, subprocess ls."""
+
+    def test_mpmath_code_not_blocked(self):
+        """mpmath pi computation must NOT be blocked by code scanner."""
+        code = 'import mpmath\nmpmath.mp.dps = 50\nprint(mpmath.mpf(3.14))\n'
+        assert _check_code_safety(code) is None
+
+    def test_sys_builtin_modules_not_blocked(self):
+        """sys.builtin_module_names introspection must NOT be blocked."""
+        code = 'import sys\nprint(sys.builtin_module_names)\n'
+        assert _check_code_safety(code) is None
+
+    def test_subprocess_ls_with_flags_allowed(self):
+        """subprocess.run(["ls", "-la", "/tmp"]) must NOT be blocked (ls is safe)."""
+        code = 'import subprocess\nsubprocess.run(["ls", "-la", "/tmp"])\n'
+        assert _check_code_safety(code) is None
+
+    def test_subprocess_dangerous_still_blocked(self):
+        """subprocess.run(["rm", "-rf", "/"]) must still be blocked."""
+        code = 'import subprocess\nsubprocess.run(["rm", "-rf", "/"])\n'
+        result = _check_code_safety(code)
+        assert result is not None
+        assert "BLOCKED" in result

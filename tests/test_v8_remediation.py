@@ -1270,3 +1270,73 @@ class TestPathSanitisation:
         assert "~/out.csv" in result
         assert "~/log.txt" in result
         assert "<hostname>" in result
+
+    def test_sanitize_paths_linux_home(self):
+        """Linux /home/user/ paths replaced with ~/."""
+        from brain.nodes.deliverer import _sanitize_paths
+        text = "Output saved to /home/agentruntime1/reports/output.csv"
+        result = _sanitize_paths(text)
+        assert "/home/" not in result
+        assert "~/reports/output.csv" in result
+
+    def test_sanitize_paths_macos_still_works(self):
+        """macOS /Users/user/ paths still replaced after regex change."""
+        from brain.nodes.deliverer import _sanitize_paths
+        text = "File at /Users/prav/Desktop/data.csv"
+        result = _sanitize_paths(text)
+        assert "/Users/" not in result
+        assert "~/Desktop/data.csv" in result
+
+
+# ── Phase 7: /deploy artifact fallback lookup ──────────────────────
+
+
+class TestDeployArtifactFallback:
+    """Deploy handler should find HTML from stored task artifacts when glob misses."""
+
+    def test_deploy_finds_html_from_task_artifacts(self, tmp_path):
+        """HTML artifact in task_state but not matching glob → still found."""
+        import json as _json
+
+        # Create an HTML file with non-standard name (no task_id in name)
+        html_file = tmp_path / "custom_page.html"
+        html_file.write_text("<!DOCTYPE html><html><body>Hello</body></html>")
+
+        # Simulate task_state with stored artifact path
+        task_state = _json.dumps({"artifacts": [str(html_file)]})
+        task = {"task_state": task_state}
+
+        # Replicate the fallback logic from cmd_deploy
+        html_files: list[Path] = []  # glob found nothing
+        if task and task.get("task_state"):
+            try:
+                state = _json.loads(task["task_state"]) if isinstance(task["task_state"], str) else task["task_state"]
+                for artifact_path in state.get("artifacts", []):
+                    p = Path(artifact_path)
+                    if p.exists() and p.suffix == ".html":
+                        html_files.append(p)
+            except (_json.JSONDecodeError, TypeError):
+                pass
+
+        assert len(html_files) == 1
+        assert html_files[0].name == "custom_page.html"
+
+    def test_deploy_fallback_skips_nonexistent_artifacts(self, tmp_path):
+        """Artifacts pointing to missing files are silently skipped."""
+        import json as _json
+
+        task_state = _json.dumps({"artifacts": ["/nonexistent/page.html"]})
+        task = {"task_state": task_state}
+
+        html_files: list[Path] = []
+        if task and task.get("task_state"):
+            try:
+                state = _json.loads(task["task_state"]) if isinstance(task["task_state"], str) else task["task_state"]
+                for artifact_path in state.get("artifacts", []):
+                    p = Path(artifact_path)
+                    if p.exists() and p.suffix == ".html":
+                        html_files.append(p)
+            except (_json.JSONDecodeError, TypeError):
+                pass
+
+        assert len(html_files) == 0

@@ -34,7 +34,7 @@ def _sanitize_paths(text: str) -> str:
     Returns:
         Text with absolute user paths and hostnames replaced.
     """
-    text = re.sub(r'/Users/\w+/', '~/', text)
+    text = re.sub(r'/(Users|home)/\w+/', '~/', text)
     text = re.sub(r'\bAdmin\.local\b', '<hostname>', text)
     return text
 

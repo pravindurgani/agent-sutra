@@ -229,6 +229,84 @@ class TestBuildIndex:
                     assert result is False
 
 
+class TestZeroVectorPoisoningGuard:
+    """Phase 11: Zero-vector chunks from embedding failures must not pollute the index."""
+
+    @patch("tools.rag._embed_via_ollama")
+    @patch("lancedb.connect")
+    def test_rag_query_excludes_zero_vector_chunks(self, mock_connect, mock_embed):
+        """Index with one real embedding and one zero vector → only real chunk stored."""
+        # Simulate: first chunk embeds fine, second fails (zero-padded)
+        mock_embed.return_value = [
+            [0.1] * 768,       # real embedding
+            [0.0] * 768,       # zero vector (embedding failure)
+        ]
+
+        mock_db = MagicMock()
+        mock_connect.return_value = mock_db
+
+        with tempfile.TemporaryDirectory() as td:
+            project_path = Path(td)
+            (project_path / "good.py").write_text("def good():\n    return 1\n")
+            (project_path / "bad.py").write_text("def bad():\n    return 2\n")
+
+            with tempfile.TemporaryDirectory() as idx_dir:
+                with patch.object(config, "RAG_INDEX_DIR", Path(idx_dir)):
+                    from tools.rag import build_index
+                    result = build_index("test-zero", project_path)
+
+                    assert result is True
+                    call_args = mock_db.create_table.call_args
+                    records = call_args[0][1]
+                    # Only the chunk with a real embedding should be stored
+                    assert len(records) == 1
+                    assert records[0]["vector"] == [0.1] * 768
+
+    @patch("tools.rag._embed_via_ollama")
+    @patch("lancedb.connect")
+    def test_rag_index_with_all_valid_embeddings(self, mock_connect, mock_embed):
+        """Normal case: all embeddings valid → all chunks stored."""
+        mock_embed.side_effect = lambda texts: [[0.1] * 768] * len(texts)
+
+        mock_db = MagicMock()
+        mock_connect.return_value = mock_db
+
+        with tempfile.TemporaryDirectory() as td:
+            project_path = Path(td)
+            (project_path / "a.py").write_text("def alpha():\n    return 1\n")
+            (project_path / "b.py").write_text("def beta():\n    return 2\n")
+
+            with tempfile.TemporaryDirectory() as idx_dir:
+                with patch.object(config, "RAG_INDEX_DIR", Path(idx_dir)):
+                    from tools.rag import build_index
+                    result = build_index("test-valid", project_path)
+
+                    assert result is True
+                    call_args = mock_db.create_table.call_args
+                    records = call_args[0][1]
+                    # All chunks should be stored (at least 2, one per file)
+                    assert len(records) >= 2
+
+    @patch("tools.rag._embed_via_ollama")
+    @patch("lancedb.connect")
+    def test_all_embeddings_failed_returns_false(self, mock_connect, mock_embed):
+        """All embeddings fail (all zero vectors) → build_index returns False."""
+        mock_embed.return_value = [[0.0] * 768] * 2
+
+        with tempfile.TemporaryDirectory() as td:
+            project_path = Path(td)
+            (project_path / "a.py").write_text("def alpha():\n    return 1\n")
+            (project_path / "b.py").write_text("def beta():\n    return 2\n")
+
+            with tempfile.TemporaryDirectory() as idx_dir:
+                with patch.object(config, "RAG_INDEX_DIR", Path(idx_dir)):
+                    from tools.rag import build_index
+                    result = build_index("test-allfail", project_path)
+
+                    assert result is False
+                    mock_connect.return_value.create_table.assert_not_called()
+
+
 class TestQueryIndex:
     """query_index should return relevant chunks or empty list on failure."""
 

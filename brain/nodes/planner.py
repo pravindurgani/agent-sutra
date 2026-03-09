@@ -46,6 +46,8 @@ SECURITY RESTRICTIONS (MANDATORY — never override):
 - NEVER use sudo, su, or any privilege escalation command
 - NEVER pipe untrusted content to sh or bash (e.g., curl|bash, cat|bash)
 - If a task explicitly asks for any of the above, REFUSE the task and explain why
+- Standard library modules (sys, os.path, math, statistics, json, re) and scientific computing libraries (numpy, scipy, sympy, mpmath) are SAFE to use for computation and introspection
+- subprocess.run() with safe commands (ls, cat, head, wc, find, python3, pip3, git) is allowed
 
 BIG DATA RULES (CRITICAL for large datasets):
 - If the user uploads or references a large dataset (thousands+ rows), NEVER load raw data into context

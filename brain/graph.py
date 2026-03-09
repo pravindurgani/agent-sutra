@@ -139,7 +139,7 @@ def run_task(
     try:
         result = agent_graph.invoke(initial_state)
         timings = result.get("stage_timings", [])
-        timing_str = " ".join(f"{t['name']}:{t['duration_ms']}ms" for t in timings)
+        timing_str = " ".join(f"{t['name']}:{t['duration_ms']/1000:.1f}s" for t in timings)
         total_ms = sum(t["duration_ms"] for t in timings) if timings else 0
         logger.info(
             "Task %s completed in %.1fs [%s] verdict=%s type=%s",

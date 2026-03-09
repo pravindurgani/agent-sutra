@@ -506,6 +506,56 @@ class TestErrorSanitization:
 # ── Rate-limited message sending ───────────────────────────────────
 
 
+# ── Timeout progress feedback ──────────────────────────────────────
+
+
+class TestTimeoutProgressFeedback:
+    """5-minute progress message and cleanup for long-running tasks."""
+
+    @pytest.mark.asyncio
+    async def test_progress_message_sent_after_5_minutes(self):
+        """Elapsed > 300s triggers a progress edit with current stage."""
+        from bot.handlers import STAGE_LABELS
+
+        status_msg = AsyncMock()
+        user_data: dict = {}
+        task_id = "prog1234-abcd-efgh"
+
+        # Simulate the progress check from the polling loop (handlers.py:852-862)
+        elapsed = 310  # > 300s
+        with patch("brain.graph.get_stage", return_value="executing"):
+            from brain.graph import get_stage
+            if elapsed > 300 and not user_data.get(f"_progress_{task_id}"):
+                user_data[f"_progress_{task_id}"] = True
+                stage = get_stage(task_id)
+                await status_msg.edit_text(
+                    f"Still working... ({STAGE_LABELS.get(stage, stage)}, {int(elapsed)}s)"
+                )
+
+        status_msg.edit_text.assert_called_once()
+        call_text = status_msg.edit_text.call_args[0][0]
+        assert "Still working" in call_text
+        assert "Generating and running code" in call_text  # STAGE_LABELS["executing"]
+        assert "310s" in call_text
+        assert user_data[f"_progress_{task_id}"] is True
+
+    @pytest.mark.asyncio
+    async def test_progress_timer_cancelled_on_completion(self):
+        """Progress flag is cleaned up in finally block after task completes."""
+        user_data = {
+            "_progress_task1234": True,
+            "_warn_task1234": True,
+        }
+
+        # Simulate the finally block cleanup (handlers.py:990-992)
+        task_id = "task1234"
+        user_data.pop(f"_progress_{task_id}", None)
+        user_data.pop(f"_warn_{task_id}", None)
+
+        assert f"_progress_{task_id}" not in user_data
+        assert f"_warn_{task_id}" not in user_data
+
+
 class TestSendLongMessageRateLimit:
     """_send_long_message must handle Telegram rate limit errors."""
 

@@ -11,6 +11,7 @@ from unittest.mock import patch
 from brain.nodes.executor import (
     _strip_markdown_blocks, _estimate_timeout, _extract_params,
     _bootstrap_project_deps, _parse_import_error_from_result,
+    _detect_truncation, _check_referenced_files,
 )
 from tools.sandbox import ExecutionResult
 
@@ -278,9 +279,6 @@ class TestBootstrapProjectDeps:
 # ── _detect_truncation (Phase 0a) ────────────────────────────────
 
 
-from brain.nodes.executor import _detect_truncation
-
-
 class TestDetectTruncationShebangGuard:
     """Shell if/fi truncation checks must only fire for actual shell scripts."""
 
@@ -346,9 +344,6 @@ class TestDetectTruncationShebangGuard:
 
 
 # ── _check_referenced_files (Phase 2) ────────────────────────────
-
-
-from brain.nodes.executor import _check_referenced_files
 
 
 class TestCheckReferencedFilesExitLanguage:

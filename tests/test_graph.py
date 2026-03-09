@@ -7,7 +7,7 @@ import logging
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 
 class TestRunTaskCompletionSummary:

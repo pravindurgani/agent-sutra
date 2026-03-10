@@ -424,7 +424,7 @@ _CODE_BLOCKED_PATTERNS = [
     (re.compile(r"Path\.home\(\).*\.env\b", re.IGNORECASE), ".env file via Path.home()"),
     # Dynamic import bypass for sandbox evasion (S-2)
     (re.compile(r"\b__import__\s*\(", re.IGNORECASE), "dynamic __import__ call"),
-    (re.compile(r"\bimportlib\s*\.\s*import_module\s*\(", re.IGNORECASE), "importlib dynamic import"),
+    # importlib.import_module — moved to AST-based _is_safe_importlib() check in _check_code_safety()
     # Dangerous direct shell execution via os module
     (re.compile(r"\bos\.system\s*\(", re.IGNORECASE), "direct shell execution via os"),
     # shutil.rmtree on home or root
@@ -543,6 +543,121 @@ def _is_safe_subprocess(code: str) -> bool:
     return True
 
 
+# Known-safe modules for importlib.import_module() — stdlib introspection set
+_IMPORTLIB_SAFE_MODULES = frozenset({
+    "sys", "os", "math", "json", "re", "datetime", "pathlib", "collections",
+    "itertools", "functools", "typing", "abc", "io", "string", "textwrap",
+    "copy", "pprint", "enum", "dataclasses", "decimal", "fractions",
+    "statistics", "random", "hashlib", "hmac", "secrets", "struct",
+    "codecs", "unicodedata", "difflib", "csv", "html", "xml",
+    "urllib", "http", "email", "logging", "warnings", "contextlib",
+    "inspect", "dis", "ast", "token", "tokenize", "types", "builtins",
+    "importlib", "pkgutil", "platform", "sysconfig", "time", "calendar",
+    "operator", "numbers",
+})
+
+
+def _is_safe_importlib(code: str) -> bool:
+    """True if ALL importlib.import_module() calls use known-safe module names.
+
+    Uses AST parsing to extract the first argument of each call. Only allows
+    string literals from the safe set. Dynamic arguments (variables, f-strings)
+    are rejected.
+
+    Args:
+        code: Python source code to inspect.
+
+    Returns:
+        True if all importlib calls are safe, False if any are unsafe or unparseable.
+    """
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return False
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        # Match importlib.import_module(...)
+        if not (isinstance(func, ast.Attribute)
+                and func.attr == "import_module"
+                and isinstance(func.value, ast.Name)
+                and func.value.id == "importlib"):
+            continue
+        # Must have at least one argument
+        if not node.args:
+            return False
+        first_arg = node.args[0]
+        # Only allow string literal arguments
+        if not (isinstance(first_arg, ast.Constant) and isinstance(first_arg.value, str)):
+            return False
+        # Check the module name against safe list (base module only)
+        module_base = first_arg.value.split(".")[0]
+        if module_base not in _IMPORTLIB_SAFE_MODULES:
+            return False
+    return True
+
+
+def _is_safe_shutil_rmtree(code: str) -> bool:
+    """True if ALL shutil.rmtree() calls use safe (non-home, non-root) targets.
+
+    Blocks:
+    - Any shutil.rmtree with a dynamic/variable argument (can't verify target)
+    - Any shutil.rmtree with a string literal starting with /, ~, or containing home
+    - Any shutil.rmtree with os.path.expanduser or Path.home() in the argument tree
+    - Current/parent directory wipes (., .., ../*)
+
+    Args:
+        code: Python source code to inspect.
+
+    Returns:
+        True if all calls are safe, False if any are unsafe or unparseable.
+    """
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return False
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        # Match shutil.rmtree(...)
+        if not (isinstance(func, ast.Attribute)
+                and func.attr == "rmtree"
+                and isinstance(func.value, ast.Name)
+                and func.value.id == "shutil"):
+            continue
+        if not node.args:
+            return False  # No argument — can't verify
+
+        first_arg = node.args[0]
+
+        # Block variable arguments (can't verify target at scan time)
+        if isinstance(first_arg, ast.Name):
+            return False
+
+        # Block string literals pointing to dangerous paths
+        if isinstance(first_arg, ast.Constant) and isinstance(first_arg.value, str):
+            path_val = first_arg.value.strip()
+            if path_val.startswith(("/", "~")) or "home" in path_val.lower():
+                return False
+            # Block current/parent directory wipes
+            if path_val in (".", "..") or path_val.startswith(".."):
+                return False
+
+        # Block any call expression as argument (expanduser, Path.home(), etc.)
+        if isinstance(first_arg, ast.Call):
+            return False
+
+        # Block Path operations: Path.home() / "x", Path("/") / "x"
+        if isinstance(first_arg, ast.BinOp):
+            return False  # Path division — can't verify safely
+
+    return True
+
+
 def _check_code_safety(code: str) -> str | None:
     """Scan Python code content for dangerous operations. Returns error message or None.
 
@@ -562,6 +677,16 @@ def _check_code_safety(code: str) -> str | None:
     if re.search(r"\bsubprocess\.\w+\s*\(", code):
         if not _is_safe_subprocess(code):
             return "BLOCKED: Code contains subprocess call with unsafe or dynamic command."
+
+    # importlib.import_module — AST-based check (safe modules allowed, config/dotenv blocked)
+    if re.search(r"\bimportlib\s*\.\s*import_module\s*\(", code, re.IGNORECASE):
+        if not _is_safe_importlib(code):
+            return "BLOCKED: importlib.import_module with unsafe or dynamic module name"
+
+    # AST-based shutil.rmtree check — catches variable indirection and function calls
+    if "shutil" in code and "rmtree" in code:
+        if not _is_safe_shutil_rmtree(code):
+            return "BLOCKED: shutil.rmtree with unsafe or unverifiable target path"
 
     # Scan full code text against Tier 1 shell blocklist.
     # Catches Python that writes .sh files with dangerous content (cat|bash, sudo),

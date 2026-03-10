@@ -311,3 +311,32 @@ Keep entries concise. Do not delete old entries.
 <!-- session ended: 2026-03-10 08:35 -->
 
 <!-- session ended: 2026-03-10 09:13 -->
+
+### 2026-03-10 — Phase 4: importlib smart allowlist
+- **Done**: Replaced blanket `importlib.import_module()` regex block with AST-based `_is_safe_importlib()` in `tools/sandbox.py`. Added `_IMPORTLIB_SAFE_MODULES` frozenset (stdlib introspection modules). 7 new tests in `test_sandbox.py`, updated 1 stress test in `test_stress_v8_audit2.py`. Updated CLAUDE.md file map, security layers, test counts.
+- **Decisions**: Followed same pattern as `_is_safe_subprocess()` — regex triggers AST inspection, AST extracts string literal args, base module checked against safe set. Dynamic args and non-stdlib modules blocked. Graceful degradation: SyntaxError → return False (block).
+- **Next**: Phase 4b (shutil.rmtree hardening)
+
+<!-- session ended: 2026-03-10 09:16 -->
+
+<!-- session ended: 2026-03-10 09:28 -->
+
+### 2026-03-10 — Phase 4b: shutil.rmtree scanner hardening
+- **Done**: Added AST-based `_is_safe_shutil_rmtree()` to `tools/sandbox.py`. Blocks variable args, call expressions (expanduser, Path.home()), BinOp (Path division), absolute paths, `~`, `.`, `..`, `../` prefixes. Existing regex at line 431 preserved as first line of defense. 7 new tests in `test_sandbox.py`. Updated CLAUDE.md.
+- **Decisions**: Followed same pattern as `_is_safe_importlib()` — fast text gate (`"shutil" in code and "rmtree" in code`) before AST parse. Only `./relative` paths allowed; everything else blocked by default.
+- **Next**: Phase 5 (was_refused executor check)
+
+<!-- session ended: 2026-03-10 09:36 -->
+
+<!-- session ended: 2026-03-10 09:42 -->
+
+### 2026-03-10 — Phase 5: executor respects was_refused
+- **Done**: Added early return in `execute()` when `state.get("was_refused")` is True. Returns `code=""`, `retry_count=MAX_RETRIES` to skip audit-retry cycles. 2 new tests in `test_executor.py`. Updated CLAUDE.md.
+- **Decisions**: Followed `_detect_environment_error()` pattern for `retry_count = MAX_RETRIES`. Kept change minimal (~10 lines) as specified.
+- **Next**: Phase 3 (HTML truncation detection)
+
+<!-- session ended: 2026-03-10 09:43 -->
+
+<!-- session ended: 2026-03-10 09:46 -->
+
+<!-- session ended: 2026-03-10 09:47 -->

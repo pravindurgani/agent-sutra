@@ -1359,20 +1359,92 @@ class TestServerManagement:
 
 
 class TestDynamicImportBypass:
-    """S-2: __import__() and importlib.import_module() must be blocked."""
+    """S-2: __import__() blocked, importlib.import_module() uses smart allowlist."""
 
     def test_dunder_import_blocked(self):
         result = _check_code_safety("mod = __import__('os')")
         assert result is not None
         assert "BLOCKED" in result
 
-    def test_importlib_import_module_blocked(self):
-        result = _check_code_safety("m = importlib.import_module('subprocess')")
+    def test_importlib_blocked_for_config(self):
+        result = _check_code_safety('import importlib; m = importlib.import_module("config")')
         assert result is not None
         assert "BLOCKED" in result
 
+    def test_importlib_blocked_for_dotenv(self):
+        result = _check_code_safety('import importlib; m = importlib.import_module("dotenv")')
+        assert result is not None
+        assert "BLOCKED" in result
+
+    def test_importlib_blocked_for_dynamic_arg(self):
+        result = _check_code_safety('import importlib; m = importlib.import_module(user_input)')
+        assert result is not None
+        assert "BLOCKED" in result
+
+    def test_importlib_blocked_for_requests(self):
+        result = _check_code_safety('import importlib; m = importlib.import_module("requests")')
+        assert result is not None
+        assert "BLOCKED" in result
+
+    def test_importlib_allowed_for_sys(self):
+        result = _check_code_safety('import importlib; m = importlib.import_module("sys")')
+        assert result is None
+
+    def test_importlib_allowed_for_math(self):
+        result = _check_code_safety('import importlib; m = importlib.import_module("math")')
+        assert result is None
+
+    def test_importlib_allowed_for_os_path(self):
+        result = _check_code_safety('import importlib; m = importlib.import_module("os.path")')
+        assert result is None
+
     def test_normal_import_allowed(self):
         result = _check_code_safety("import pandas as pd\ndf = pd.read_csv('data.csv')")
+        assert result is None
+
+
+# ── v9.0.0 Phase 4b: shutil.rmtree AST hardening ─────────────────────
+
+
+class TestShutilRmtreeHardening:
+    """Phase 4b: AST-based shutil.rmtree scanner catches variable/call/traversal patterns."""
+
+    def test_rmtree_blocked_absolute_path(self):
+        result = _check_code_safety('import shutil; shutil.rmtree("/tmp/workspace/output")')
+        assert result is not None
+        assert "BLOCKED" in result
+
+    def test_rmtree_blocked_current_dir(self):
+        result = _check_code_safety('import shutil; shutil.rmtree(".")')
+        assert result is not None
+        assert "BLOCKED" in result
+
+    def test_rmtree_blocked_parent_traversal(self):
+        result = _check_code_safety('import shutil; shutil.rmtree("../other")')
+        assert result is not None
+        assert "BLOCKED" in result
+
+    def test_rmtree_blocked_with_variable(self):
+        result = _check_code_safety('import shutil; target="/home/user"; shutil.rmtree(target)')
+        assert result is not None
+        assert "BLOCKED" in result
+
+    def test_rmtree_blocked_with_expanduser(self):
+        result = _check_code_safety(
+            'import shutil, os; shutil.rmtree(os.path.expanduser("~/Documents"))'
+        )
+        assert result is not None
+        assert "BLOCKED" in result
+
+    def test_rmtree_blocked_with_path_home(self):
+        result = _check_code_safety(
+            'import shutil; from pathlib import Path; shutil.rmtree(Path.home() / "docs")'
+        )
+        assert result is not None
+        assert "BLOCKED" in result
+
+    def test_rmtree_allowed_relative_path(self):
+        result = _check_code_safety('import shutil; shutil.rmtree("./output")')
         assert result is None
 
 

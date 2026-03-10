@@ -3,7 +3,7 @@
 Single-user, self-hosted AI agent. Telegram-controlled. Mac Mini M2 (16GB).
 Fixed 5-stage LangGraph pipeline: Classify → Plan → Execute → Audit → Deliver.
 Cross-model adversarial auditing: Sonnet generates, Opus reviews.
-~7,876 LOC across 21 source files. ~11,000 LOC tests across 28 files. 796 test functions (760 passing, 36 skipped).
+~7,876 LOC across 21 source files. ~11,000 LOC tests across 28 files. 811 test functions (775 passing, 36 skipped).
 
 ## Architecture
 
@@ -24,10 +24,10 @@ Cross-model adversarial auditing: Sonnet generates, Opus reviews.
 | `brain/graph.py` | 151 | LangGraph wiring, `run_task()`, stage tracking, node timing, task completion summary |
 | `brain/nodes/classifier.py` | 99 | Fast path (trigger match) → slow path (Claude/Ollama classify), word-boundary fallback |
 | `brain/nodes/planner.py` | 417 | Task-type prompts, standards/memory/RAG-first file injection, 7 templates, refusal detection, file selector retry, legacy fallback |
-| `brain/nodes/executor.py` | 827 | Code gen + sandbox execution, project commands, auto-install, truncation detection (shebang-gated), file ref validation, over-gen limits |
+| `brain/nodes/executor.py` | 838 | Code gen + sandbox execution, project commands, auto-install, truncation detection (shebang-gated), file ref validation, over-gen limits, was_refused guard |
 | `brain/nodes/auditor.py` | 314 | Opus adversarial review, env error short-circuit, visual check, fabrication detection (strengthened), XML-wrapped prompts |
 | `brain/nodes/deliverer.py` | 430 | Response formatting, memory extraction, temporal mining, debug sidecar, credential filter (expanded), path sanitisation (Linux+macOS) |
-| `tools/sandbox.py` | 1559 | Execution sandbox: AST scanner, smart subprocess, written-file scanning, Docker, streaming, server mgmt |
+| `tools/sandbox.py` | 1684 | Execution sandbox: AST scanner, smart subprocess, importlib allowlist, shutil.rmtree hardening, written-file scanning, Docker, streaming, server mgmt |
 | `tools/rag.py` | 324 | RAG context layer: LanceDB index, Ollama embeddings, AST-based Python chunking, query/build, zero-vector filtering |
 | `tools/model_router.py` | 224 | Claude/Ollama routing by purpose, complexity, RAM, budget, empty response retry, unclosed think-block handling |
 | `tools/claude_client.py` | 425 | Anthropic API wrapper: retries, cost tracking, streaming, midnight-based budget, daily breakdown, budget remaining |
@@ -82,7 +82,7 @@ Cross-model adversarial auditing: Sonnet generates, Opus reviews.
 - **Tier 1** — 39 blocked patterns: `rm -rf`, `sudo`, `curl|sh`, `chmod 777`, `mkfs`, fork bombs, etc. Always blocked.
 - **Tier 1+ (v8.4.1)** — Full Python code text scanned against Tier 1 blocklist (catches shell patterns in strings/comments). Script file content scanned when `bash/sh` executes a file.
 - **Tier 3** — 12 audit-logged patterns: `rm`, `chmod`, `git push`, `curl`, `python3 -c`. Allowed but logged.
-- **Tier 4 (v8.5.2, hardened v8.7.0)** — 51 code scanner patterns: credential reads, dangerous system calls, filesystem wipes, reverse shells, config imports, os.popen, dynamic code, getattr(os), base64 decode, ctypes, chr-chain obfuscation. Smart subprocess allowlist (AST-based, replaces blanket block). Scans Python content.
+- **Tier 4 (v8.5.2, hardened v8.7.0, v9.0.0)** — 50 code scanner patterns: credential reads, dangerous system calls, filesystem wipes, reverse shells, config imports, os.popen, dynamic code, getattr(os), base64 decode, ctypes, chr-chain obfuscation. Smart subprocess allowlist (AST-based). Smart importlib allowlist (AST-based, stdlib-only — blocks config/dotenv/dynamic args). Scans Python content.
 - **Tier 5** — JS code scanner patterns for frontend tasks.
 - **Credential stripping** — `_filter_env()` removes API keys/tokens/secrets from subprocess env via exact match + substring. Applied to server processes too (v8.5.2).
 - **Docker isolation** — Optional container execution. Only `workspace/` mounted. All caps dropped, PIDs limited to 256.
@@ -173,7 +173,7 @@ Dev machine uses `projects.yaml` with different local paths.
 ```bash
 just test-quick                           # skip Docker, stop on first failure
 just test-security                        # security-critical tests only
-pytest tests/ -v                          # all 796 tests (760 pass, 36 skip)
+pytest tests/ -v                          # all 811 tests (775 pass, 36 skip)
 pytest tests/ -v -k "not docker"          # skip Docker-required tests
 pytest tests/test_sandbox.py -v           # sandbox + AST scanner + written-file scanning
 pytest tests/test_rag.py -v              # RAG context layer (22 tests)

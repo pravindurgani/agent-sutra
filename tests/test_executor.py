@@ -390,3 +390,50 @@ class TestOverGenerationLimits:
 
         assert any("over-generation" in r.message for r in caplog.records)
         assert any("600" in r.message for r in caplog.records)
+
+
+# ── v9.0.0 Phase 5: executor respects was_refused ────────────────────
+
+
+class TestExecutorRespectsWasRefused:
+    """Executor must skip code generation when planner refused the task."""
+
+    def test_execute_skips_on_was_refused(self) -> None:
+        """was_refused=True → immediate return, code='', retry_count=MAX_RETRIES."""
+        from brain.nodes.executor import execute
+
+        state = {
+            "task_id": "test-refused", "user_id": 1, "message": "Read /etc/shadow",
+            "files": [], "task_type": "code", "project_name": "",
+            "project_config": {}, "plan": "I cannot do this.",
+            "was_refused": True, "retry_count": 0,
+        }
+        result = execute(state)
+        assert result["code"] == ""
+        assert result["retry_count"] == config.MAX_RETRIES
+        assert "refused" in result["execution_result"].lower()
+
+    @patch("brain.nodes.executor.claude_client.call", return_value="print('hello')")
+    @patch("brain.nodes.executor.run_code_with_auto_install")
+    def test_execute_proceeds_on_was_refused_false(
+        self, mock_run: object, mock_call: object,
+    ) -> None:
+        """was_refused=False → proceeds to code generation normally."""
+        from brain.nodes.executor import execute
+        from tools.sandbox import ExecutionResult
+
+        mock_run.return_value = ExecutionResult(
+            success=True, stdout="hello\n", stderr="", return_code=0,
+        )
+        state = {
+            "task_id": "test-normal", "user_id": 1, "message": "Print hello",
+            "files": [], "task_type": "code", "project_name": "",
+            "project_config": {}, "plan": "1. Print hello",
+            "was_refused": False, "retry_count": 0,
+            "working_dir": "", "auto_installed_packages": [],
+            "audit_feedback": "", "conversation_context": "",
+        }
+        result = execute(state)
+        # Should have generated and run code
+        assert mock_call.called
+        assert result.get("code") is not None

@@ -215,6 +215,17 @@ Write a COMPLETE, self-contained HTML file with embedded React/JavaScript. Rules
 
 def execute(state: AgentState) -> dict:
     """Generate and execute code or shell commands based on the plan."""
+
+    # If planner refused the task, skip code generation and force immediate delivery.
+    # Set retry_count = MAX_RETRIES to prevent wasted audit-retry cycles.
+    if state.get("was_refused"):
+        logger.info("Skipping execution — planner refused task %s", state["task_id"])
+        return {
+            "execution_result": "Task was refused by the planner on policy grounds. No code generated.",
+            "code": "",
+            "retry_count": config.MAX_RETRIES,  # Force skip to delivery
+        }
+
     task_type = state.get("task_type", "code")
 
     if task_type == "project":

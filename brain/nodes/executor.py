@@ -107,6 +107,28 @@ def _detect_truncation(code: str) -> bool:
         shell_truncated = (if_count > fi_count + 2) or (do_count > done_count + 1)
         truncated = truncated or shell_truncated
 
+    # HTML truncation — check for unclosed root elements
+    # Only trigger for code that is generating HTML (contains DOCTYPE or <html)
+    stripped_lower = stripped.lower()
+    if "<!doctype" in stripped_lower or "<html" in stripped_lower:
+        has_html_open = "<html" in stripped_lower
+        has_html_close = "</html>" in stripped_lower
+        if has_html_open and not has_html_close:
+            truncated = True
+            logger.warning("HTML truncation detected: <html> without </html>")
+
+        # Also check for unclosed <script> and <style> blocks
+        script_opens = stripped_lower.count("<script")
+        script_closes = stripped_lower.count("</script>")
+        style_opens = stripped_lower.count("<style")
+        style_closes = stripped_lower.count("</style>")
+        if script_opens > script_closes or style_opens > style_closes:
+            truncated = True
+            logger.warning(
+                "HTML truncation: unclosed tags script=%d/%d style=%d/%d",
+                script_opens, script_closes, style_opens, style_closes,
+            )
+
     if truncated:
         logger.warning(
             "Code appears truncated: parens=%d brackets=%d braces=%d "

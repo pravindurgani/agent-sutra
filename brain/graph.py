@@ -60,12 +60,27 @@ def _wrap_node(name: str, func):
 
 
 def should_retry(state: AgentState) -> str:
-    """Decide whether to retry execution or deliver the result."""
+    """Decide whether to retry execution or deliver the result.
+
+    Early-exits if the current audit feedback matches the previous attempt's
+    feedback (first 150 chars), preventing identical retries on unrecoverable errors.
+    """
     if state.get("audit_verdict") == "pass":
         return "deliver"
     if state.get("retry_count", 0) >= config.MAX_RETRIES:
         logger.warning("Max retries reached for task %s", state["task_id"])
         return "deliver"
+
+    # Duplicate error detection: if same feedback as last attempt, stop retrying
+    current_feedback = (state.get("audit_feedback") or "")[:150]
+    previous_feedback = (state.get("previous_audit_feedback") or "")[:150]
+    if current_feedback and previous_feedback and current_feedback == previous_feedback:
+        logger.warning(
+            "Duplicate audit feedback for task %s — aborting retries (was: %.80s)",
+            state["task_id"], current_feedback,
+        )
+        return "deliver"
+
     logger.info("Retrying task %s (attempt %d)", state["task_id"], state.get("retry_count", 0))
     return "plan"
 
@@ -133,6 +148,7 @@ def run_task(
         "server_url": "",
         "deploy_url": "",
         "was_refused": False,
+        "previous_audit_feedback": "",
     }
 
     logger.info("Starting agent pipeline for task %s", task_id)

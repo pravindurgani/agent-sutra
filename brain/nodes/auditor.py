@@ -48,7 +48,14 @@ FABRICATION CHECK (CRITICAL):
 - FAIL if the code creates sample/fake/mock data files when the task asked to READ or ANALYSE existing data
 - FAIL if the code fabricates an entire library/SDK module instead of importing a real, installable package
 - FAIL if the code writes credential-shaped strings (ghp_, sk-, xoxb-, ya29., AKIA) to any output file
-- FAIL if the code creates a fake directory tree or generates synthetic data to substitute for missing real data"""
+- FAIL if the code creates a fake directory tree or generates synthetic data to substitute for missing real data
+
+DATA SANITY CHECK (for data analysis/reporting tasks):
+- If the output contains percentages: verify they are between 0–100% (unless explicitly a growth rate or ratio)
+- If the output contains rates (CTR, engagement rate, conversion rate): verify the denominator is non-zero
+- If impressions = 0 but clicks > 0: FAIL (mathematically impossible)
+- If any metric exceeds 1000% in a standard report context: FAIL with "data anomaly detected"
+- Look for signs of column misalignment: repeated zero values where non-zero is expected, wildly inconsistent magnitudes across rows"""
 
 AUDIT_CRITERIA = {
     "code": """
@@ -68,8 +75,9 @@ Evaluate:
 3. Did all data validation assertions pass? Look for "ALL ASSERTIONS PASSED".
 4. Were output files (charts, CSVs) generated?
 5. Are there tracebacks or errors?
+6. DATA SANITY: Are percentages between 0–100%? Are derived metrics consistent with source data (e.g., CTR = clicks/impressions, so impressions must be > 0 if clicks > 0)? Are there zero-denominator artifacts?
 
-FAIL if: non-zero exit code, assertion failures, no output files when expected, traceback present.""",
+FAIL if: non-zero exit code, assertion failures, no output files when expected, traceback present, mathematically impossible values in output data.""",
 
     "project": """
 Evaluate:
@@ -242,6 +250,7 @@ Task type: {task_type}
     return {
         "audit_verdict": verdict,
         "audit_feedback": feedback,
+        "previous_audit_feedback": state.get("audit_feedback", ""),
         "retry_count": retry_count,
     }
 

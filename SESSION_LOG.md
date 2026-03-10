@@ -339,4 +339,31 @@ Keep entries concise. Do not delete old entries.
 
 <!-- session ended: 2026-03-10 09:46 -->
 
+### 2026-03-10 — Phase 3: HTML truncation detection
+- **Done**: Added HTML truncation checks to `_detect_truncation()` in `executor.py`. Detects unclosed `<html>`, `<script>`, `<style>` tags. Gated by DOCTYPE/html detection to avoid false positives on pure Python. 6 new tests in `test_executor.py`. Updated CLAUDE.md.
+- **Decisions**: Only root-level tags checked (html/script/style) per plan rationale — div/span would cause massive false positives in template literals and JSX.
+- **Next**: Phase 1 (duplicate error detection)
+
 <!-- session ended: 2026-03-10 09:47 -->
+
+<!-- session ended: 2026-03-10 09:47 -->
+
+<!-- session ended: 2026-03-10 09:51 -->
+
+### 2026-03-10 — Phase 1: duplicate error detection in retry loop
+- **Done**: Added `previous_audit_feedback` field to AgentState (25th field). Modified `should_retry()` to compare first 150 chars of current vs previous audit feedback — stops retrying on duplicate errors. Auditor saves previous feedback before overwriting. 4 new tests in `test_graph.py`. Updated CLAUDE.md field counts and file map.
+- **Decisions**: Exact match on first 150 chars (no fuzzy matching) per plan spec. Check ordered after verdict==pass and max_retries to never block first failures. Empty previous_audit_feedback always retries.
+- **Next**: Phase 2 (audit data sanity)
+
+<!-- session ended: 2026-03-10 10:22 -->
+
+<!-- session ended: 2026-03-10 10:26 -->
+
+### 2026-03-10 — Phase 2: audit data sanity checks
+- **Done**: Added data sanity instructions to `SYSTEM_BASE` (all task types) and `AUDIT_CRITERIA["data"]` (data tasks). Opus now instructed to catch: impossible CTR (0 impressions + clicks), rates >1000%, zero-denominator artifacts, column misalignment. 5 new tests in `test_auditor.py` (3 mocked Opus responses + 2 prompt content checks). Updated CLAUDE.md.
+- **Decisions**: Prompt-only change (~9 lines added to each location). No post-execution numeric validator — Opus interprets the instructions. Belt-and-suspenders: both SYSTEM_BASE and data criteria contain sanity language per plan spec.
+- **Next**: Batch 2 complete (4, 4b, 5, 3, 1, 2). Proceed to Batch 3 or test run.
+
+<!-- session ended: 2026-03-10 10:30 -->
+
+<!-- session ended: 2026-03-10 10:39 -->

@@ -1,10 +1,13 @@
-"""Tests for brain/nodes/auditor.py — JSON extraction and environment error detection."""
+"""Tests for brain/nodes/auditor.py — JSON extraction, environment error detection, data sanity."""
 from __future__ import annotations
 
+import json
 import sys
 import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from unittest.mock import patch
 
 from brain.nodes.auditor import _extract_json, _detect_environment_error
 
@@ -159,3 +162,87 @@ class TestEnvironmentErrorDetection:
         result = audit(state)
         assert result["retry_count"] >= config.MAX_RETRIES
         assert "ENVIRONMENT ERROR" in result["audit_feedback"]
+
+
+# ── v9.0.0 Phase 2: Data sanity checks in audit prompts ──────────
+
+
+class TestAuditDataSanity:
+    """Auditor prompts must instruct Opus to catch impossible data metrics."""
+
+    def _make_data_state(self, execution_result: str) -> dict:
+        return {
+            "task_id": "data-sanity-test",
+            "message": "Analyse campaign performance data",
+            "task_type": "data",
+            "plan": "Read CSV, compute CTR, generate report",
+            "code": "import pandas as pd\ndf = pd.read_csv('data.csv')\nprint(df)",
+            "execution_result": execution_result,
+            "retry_count": 0,
+            "audit_feedback": "",
+        }
+
+    @patch("brain.nodes.auditor.claude_client.call")
+    def test_audit_catches_impossible_ctr(self, mock_call):
+        """0 impressions + 91499 clicks + 11600% CTR → verdict=fail."""
+        mock_call.return_value = json.dumps({
+            "verdict": "fail",
+            "feedback": "Data anomaly detected: 0 impressions with 91499 clicks and 11600% CTR is mathematically impossible.",
+        })
+        from brain.nodes.auditor import audit
+        state = self._make_data_state(
+            "Execution: OK (exit code 0)\nStdout:\n"
+            "Campaign: Tugi Tark\n"
+            "Impressions: 0\nClicks: 91499\nCTR: 11600%\n"
+            "ALL ASSERTIONS PASSED"
+        )
+        result = audit(state)
+        assert result["audit_verdict"] == "fail"
+
+    @patch("brain.nodes.auditor.claude_client.call")
+    def test_audit_passes_valid_data(self, mock_call):
+        """10000 impressions + 500 clicks + 5.0% CTR → verdict=pass."""
+        mock_call.return_value = json.dumps({
+            "verdict": "pass",
+            "feedback": "Data metrics are consistent. CTR of 5.0% is valid (500/10000).",
+        })
+        from brain.nodes.auditor import audit
+        state = self._make_data_state(
+            "Execution: OK (exit code 0)\nStdout:\n"
+            "Campaign: Test Campaign\n"
+            "Impressions: 10000\nClicks: 500\nCTR: 5.0%\n"
+            "ALL ASSERTIONS PASSED"
+        )
+        result = audit(state)
+        assert result["audit_verdict"] == "pass"
+
+    @patch("brain.nodes.auditor.claude_client.call")
+    def test_audit_catches_zero_denominator_rate(self, mock_call):
+        """0 views + 850% engagement → verdict=fail."""
+        mock_call.return_value = json.dumps({
+            "verdict": "fail",
+            "feedback": "Data anomaly: engagement rate of 850% with 0 views indicates a zero-denominator artifact.",
+        })
+        from brain.nodes.auditor import audit
+        state = self._make_data_state(
+            "Execution: OK (exit code 0)\nStdout:\n"
+            "Views: 0\nEngagement Rate: 850%\n"
+            "ALL ASSERTIONS PASSED"
+        )
+        result = audit(state)
+        assert result["audit_verdict"] == "fail"
+
+    def test_system_prompt_includes_data_sanity_language(self):
+        """SYSTEM_BASE must contain data sanity instructions for Opus."""
+        from brain.nodes.auditor import SYSTEM_BASE
+        assert "DATA SANITY CHECK" in SYSTEM_BASE
+        assert "impressions = 0 but clicks > 0" in SYSTEM_BASE
+        assert "1000%" in SYSTEM_BASE
+
+    def test_data_criteria_includes_sanity_check(self):
+        """AUDIT_CRITERIA["data"] must reference data sanity validation."""
+        from brain.nodes.auditor import AUDIT_CRITERIA
+        data_criteria = AUDIT_CRITERIA["data"]
+        assert "DATA SANITY" in data_criteria
+        assert "zero-denominator" in data_criteria
+        assert "mathematically impossible" in data_criteria

@@ -56,6 +56,9 @@ class AgentState(TypedDict):
     # Refusal tracking (set by planner when task is refused on policy grounds)
     was_refused: bool
 
+    # Duplicate error detection (set by auditor, checked by should_retry)
+    previous_audit_feedback: str
+
     # Output
     final_response: str
     artifacts: list[str]  # file paths to send back

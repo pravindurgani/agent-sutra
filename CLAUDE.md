@@ -3,7 +3,7 @@
 Single-user, self-hosted AI agent. Telegram-controlled. Mac Mini M2 (16GB).
 Fixed 5-stage LangGraph pipeline: Classify → Plan → Execute → Audit → Deliver.
 Cross-model adversarial auditing: Sonnet generates, Opus reviews.
-~7,876 LOC across 21 source files. ~11,000 LOC tests across 28 files. 811 test functions (775 passing, 36 skipped).
+~7,876 LOC across 21 source files. ~11,000 LOC tests across 28 files. 826 test functions (790 passing, 36 skipped).
 
 ## Architecture
 
@@ -20,12 +20,12 @@ Cross-model adversarial auditing: Sonnet generates, Opus reviews.
 |------|------:|---------|
 | `main.py` | 240 | Entry point: env validation, DB init, crash recovery, Ollama startup test, SIGTERM handler, bot start |
 | `config.py` | 144 | All constants, paths, model names, timeouts, budget caps, crash-safe env parsing, RAG config |
-| `brain/state.py` | 61 | `AgentState` TypedDict — 24 fields flowing through pipeline |
-| `brain/graph.py` | 151 | LangGraph wiring, `run_task()`, stage tracking, node timing, task completion summary |
+| `brain/state.py` | 64 | `AgentState` TypedDict — 25 fields flowing through pipeline |
+| `brain/graph.py` | 167 | LangGraph wiring, `run_task()`, stage tracking, node timing, duplicate error detection, task completion summary |
 | `brain/nodes/classifier.py` | 99 | Fast path (trigger match) → slow path (Claude/Ollama classify), word-boundary fallback |
 | `brain/nodes/planner.py` | 417 | Task-type prompts, standards/memory/RAG-first file injection, 7 templates, refusal detection, file selector retry, legacy fallback |
-| `brain/nodes/executor.py` | 838 | Code gen + sandbox execution, project commands, auto-install, truncation detection (shebang-gated), file ref validation, over-gen limits, was_refused guard |
-| `brain/nodes/auditor.py` | 314 | Opus adversarial review, env error short-circuit, visual check, fabrication detection (strengthened), XML-wrapped prompts |
+| `brain/nodes/executor.py` | 860 | Code gen + sandbox execution, project commands, auto-install, truncation detection (shebang-gated + HTML), file ref validation, over-gen limits, was_refused guard |
+| `brain/nodes/auditor.py` | 323 | Opus adversarial review, env error short-circuit, visual check, fabrication detection (strengthened), data sanity checks, XML-wrapped prompts |
 | `brain/nodes/deliverer.py` | 430 | Response formatting, memory extraction, temporal mining, debug sidecar, credential filter (expanded), path sanitisation (Linux+macOS) |
 | `tools/sandbox.py` | 1684 | Execution sandbox: AST scanner, smart subprocess, importlib allowlist, shutil.rmtree hardening, written-file scanning, Docker, streaming, server mgmt |
 | `tools/rag.py` | 324 | RAG context layer: LanceDB index, Ollama embeddings, AST-based Python chunking, query/build, zero-vector filtering |
@@ -63,13 +63,13 @@ Cross-model adversarial auditing: Sonnet generates, Opus reviews.
 | `project_memory` (v8) | Success/failure patterns | project_name, memory_type, content, task_id |
 | `api_usage` | API cost tracking | model, input_tokens, output_tokens, thinking_tokens, timestamp |
 
-## AgentState TypedDict (24 fields)
+## AgentState TypedDict (25 fields)
 
 `task_id`, `user_id`, `message`, `files`, `task_type`, `project_name`, `project_config`,
 `plan`, `code`, `execution_result`, `audit_verdict`, `audit_feedback`, `retry_count`,
 `stage`, `extracted_params`, `working_dir`, `conversation_context`,
 `auto_installed_packages`, `stage_timings` (v8), `server_url` (v8.2), `deploy_url` (v8.1),
-`was_refused` (v8.8), `final_response`, `artifacts`
+`was_refused` (v8.8), `previous_audit_feedback` (v9), `final_response`, `artifacts`
 
 ## Telegram Commands (19)
 
@@ -88,11 +88,11 @@ Cross-model adversarial auditing: Sonnet generates, Opus reviews.
 - **Docker isolation** — Optional container execution. Only `workspace/` mounted. All caps dropped, PIDs limited to 256.
 - **Opus audit gate** — Every output reviewed by a different model before delivery. XML-delimited prompts resist injection (v8.5.2).
 - **Visual verification** — Optional Playwright check for frontend tasks: page loads, console errors, screenshot (feeds into audit prompt). Localhost-only SSRF guard (v8.5.2).
-- **Fabrication detection (v8.4.1)** — Auditor checks if agent substituted libraries, faked data, or rewrote the task. Deliverer enforces honest failure reporting.
+- **Fabrication detection (v8.4.1, v9.0.0)** — Auditor checks if agent substituted libraries, faked data, or rewrote the task. Data sanity checks catch mathematically impossible metrics (e.g., 0 impressions with non-zero clicks). Deliverer enforces honest failure reporting.
 - **Chain strict-AND gate (v8.4.1)** — Exit-code based halting (Claude can't fake exit codes). Literal execution prefix prevents graceful rewriting.
 - **AST constant folding (v8.7.0)** — Resolves string concatenation (`"su" + "do"` → `"sudo"`) in Python AST to catch obfuscation bypasses.
 - **Written-file scanning (v8.7.0)** — Post-execution scan of newly created .sh/.py/.js files against existing blocklists.
-- **Truncation detection (v8.4.1, extended v8.7.0, fixed v8.8.0)** — Detects code cut off by max_tokens (unclosed parens/brackets/strings, shell if/fi do/done). Shell checks gated by shebang detection (v8.8.0 — fixes false positives on Python code). Auto-retries with shorter prompt.
+- **Truncation detection (v8.4.1, extended v8.7.0, fixed v8.8.0, v9.0.0)** — Detects code cut off by max_tokens (unclosed parens/brackets/strings, shell if/fi do/done, HTML html/script/style tags). Shell checks gated by shebang detection. HTML checks gated by DOCTYPE/html detection. Auto-retries with shorter prompt.
 - **Budget enforcement** — Daily/monthly caps with midnight-based cutoffs (v8.5.2) checked before every Claude API call.
 - **RAM guard** — Rejects tasks above 90% memory usage.
 - **Input validation (v8.5.2)** — Crash-safe env parsing, hex-validated task IDs, file upload caps (10), JSON size caps (10MB), working directory path validation.
@@ -173,7 +173,7 @@ Dev machine uses `projects.yaml` with different local paths.
 ```bash
 just test-quick                           # skip Docker, stop on first failure
 just test-security                        # security-critical tests only
-pytest tests/ -v                          # all 811 tests (775 pass, 36 skip)
+pytest tests/ -v                          # all 826 tests (790 pass, 36 skip)
 pytest tests/ -v -k "not docker"          # skip Docker-required tests
 pytest tests/test_sandbox.py -v           # sandbox + AST scanner + written-file scanning
 pytest tests/test_rag.py -v              # RAG context layer (22 tests)

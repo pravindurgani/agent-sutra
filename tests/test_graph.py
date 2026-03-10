@@ -9,6 +9,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from unittest.mock import patch
 
+from brain.graph import should_retry
+
 
 class TestRunTaskCompletionSummary:
     """run_task() must log a structured summary line on completion."""
@@ -70,3 +72,51 @@ class TestRunTaskCompletionSummary:
         summary_records = [r for r in caplog.records if "completed in" in r.message]
         assert len(summary_records) == 1
         assert "verdict=fail" in summary_records[0].message
+
+
+class TestShouldRetryDuplicateDetection:
+    """should_retry() stops retrying when audit feedback repeats."""
+
+    def test_should_retry_exits_on_duplicate_feedback(self):
+        """Duplicate feedback (first 150 chars match) → returns 'deliver'."""
+        state = {
+            "task_id": "dup-test-1234",
+            "audit_verdict": "fail",
+            "audit_feedback": "Error: module 'foo' has no attribute 'bar'",
+            "previous_audit_feedback": "Error: module 'foo' has no attribute 'bar'",
+            "retry_count": 1,
+        }
+        assert should_retry(state) == "deliver"
+
+    def test_should_retry_continues_on_different_feedback(self):
+        """Different feedback → returns 'plan' (retry with new approach)."""
+        state = {
+            "task_id": "diff-test-1234",
+            "audit_verdict": "fail",
+            "audit_feedback": "Error: missing import for pandas",
+            "previous_audit_feedback": "Error: file output.csv was not created",
+            "retry_count": 1,
+        }
+        assert should_retry(state) == "plan"
+
+    def test_should_retry_continues_on_first_failure(self):
+        """First failure (previous='') → returns 'plan' (always retry first time)."""
+        state = {
+            "task_id": "first-fail-1234",
+            "audit_verdict": "fail",
+            "audit_feedback": "Error: syntax error on line 42",
+            "previous_audit_feedback": "",
+            "retry_count": 1,
+        }
+        assert should_retry(state) == "plan"
+
+    def test_should_retry_still_respects_max_retries(self):
+        """Max retries reached with different feedback → returns 'deliver'."""
+        state = {
+            "task_id": "max-retry-1234",
+            "audit_verdict": "fail",
+            "audit_feedback": "Error: new problem this time",
+            "previous_audit_feedback": "Error: old problem last time",
+            "retry_count": 3,
+        }
+        assert should_retry(state) == "deliver"

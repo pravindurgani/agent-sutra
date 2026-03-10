@@ -343,6 +343,37 @@ class TestDetectTruncationShebangGuard:
         assert _detect_truncation(code) is True
 
 
+# ── v9.0.0 Phase 3: HTML truncation detection ────────────────────
+
+
+class TestDetectTruncationHTML:
+    """HTML truncation: unclosed <html>, <script>, <style> tags."""
+
+    def test_truncation_detects_unclosed_html(self) -> None:
+        code = "<!DOCTYPE html><html><head></head><body><div>"
+        assert _detect_truncation(code) is True
+
+    def test_truncation_passes_complete_html(self) -> None:
+        code = "<!DOCTYPE html><html><head></head><body></body></html>"
+        assert _detect_truncation(code) is False
+
+    def test_truncation_detects_unclosed_script(self) -> None:
+        code = '<!DOCTYPE html><html><body><script>function foo() {'
+        assert _detect_truncation(code) is True
+
+    def test_truncation_detects_unclosed_style(self) -> None:
+        code = "<!DOCTYPE html><html><head><style>.foo {"
+        assert _detect_truncation(code) is True
+
+    def test_truncation_ignores_html_in_python_string(self) -> None:
+        code = 'html = "<html>" + content + "</html>"'
+        assert _detect_truncation(code) is False
+
+    def test_truncation_no_false_positive_on_pure_python(self) -> None:
+        code = 'print("hello world")'
+        assert _detect_truncation(code) is False
+
+
 # ── _check_referenced_files (Phase 2) ────────────────────────────
 
 

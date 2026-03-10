@@ -3,7 +3,7 @@
 Single-user, self-hosted AI agent. Telegram-controlled. Mac Mini M2 (16GB).
 Fixed 5-stage LangGraph pipeline: Classify → Plan → Execute → Audit → Deliver.
 Cross-model adversarial auditing: Sonnet generates, Opus reviews.
-~7,876 LOC across 21 source files. ~11,000 LOC tests across 28 files. 826 test functions (790 passing, 36 skipped).
+~7,876 LOC across 21 source files. ~11,000 LOC tests across 29 files. 836 test functions (800 passing, 36 skipped).
 
 ## Architecture
 
@@ -23,10 +23,10 @@ Cross-model adversarial auditing: Sonnet generates, Opus reviews.
 | `brain/state.py` | 64 | `AgentState` TypedDict — 25 fields flowing through pipeline |
 | `brain/graph.py` | 167 | LangGraph wiring, `run_task()`, stage tracking, node timing, duplicate error detection, task completion summary |
 | `brain/nodes/classifier.py` | 99 | Fast path (trigger match) → slow path (Claude/Ollama classify), word-boundary fallback |
-| `brain/nodes/planner.py` | 417 | Task-type prompts, standards/memory/RAG-first file injection, 7 templates, refusal detection, file selector retry, legacy fallback |
+| `brain/nodes/planner.py` | 428 | Task-type prompts, standards/memory/ARCHITECTURE.md/RAG-first file injection, 7 templates, refusal detection, file selector retry, legacy fallback |
 | `brain/nodes/executor.py` | 860 | Code gen + sandbox execution, project commands, auto-install, truncation detection (shebang-gated + HTML), file ref validation, over-gen limits, was_refused guard |
-| `brain/nodes/auditor.py` | 323 | Opus adversarial review, env error short-circuit, visual check, fabrication detection (strengthened), data sanity checks, XML-wrapped prompts |
-| `brain/nodes/deliverer.py` | 430 | Response formatting, memory extraction, temporal mining, debug sidecar, credential filter (expanded), path sanitisation (Linux+macOS) |
+| `brain/nodes/auditor.py` | 328 | Opus adversarial review, env error short-circuit, visual check, fabrication detection (strengthened), data sanity checks, task-type criteria expansion, XML-wrapped prompts |
+| `brain/nodes/deliverer.py` | 438 | Response formatting, memory extraction, temporal mining, debug sidecar, credential filter (expanded), path sanitisation (Linux+macOS), ARCHITECTURE.md suggestion |
 | `tools/sandbox.py` | 1684 | Execution sandbox: AST scanner, smart subprocess, importlib allowlist, shutil.rmtree hardening, written-file scanning, Docker, streaming, server mgmt |
 | `tools/rag.py` | 324 | RAG context layer: LanceDB index, Ollama embeddings, AST-based Python chunking, query/build, zero-vector filtering |
 | `tools/model_router.py` | 224 | Claude/Ollama routing by purpose, complexity, RAM, budget, empty response retry, unclosed think-block handling |
@@ -34,7 +34,7 @@ Cross-model adversarial auditing: Sonnet generates, Opus reviews.
 | `tools/file_manager.py` | 157 | Upload handling, metadata extraction, content reading, JSON size cap |
 | `tools/deployer.py` | 235 | Static deployment: GitHub Pages, Vercel, Firebase, credential-safe subprocess |
 | `tools/visual_check.py` | 90 | Playwright headless Chromium: page load, console errors, screenshot, SSRF guard |
-| `tools/projects.py` | 125 | Project registry loader, trigger matcher, word-boundary regex, mention-context exclusion |
+| `tools/projects.py` | 128 | Project registry loader, trigger matcher, word-boundary regex, mention-context exclusion, run_instructions injection |
 | `storage/db.py` | 468 | SQLite ops: async (bot) + sync (pipeline), 5 tables, WAL mode, history FIFO cap, partial state persistence |
 | `scheduler/cron.py` | 67 | APScheduler with SQLite persistence, prefix-length validation |
 | `bot/telegram_bot.py` | 69 | Bot factory, 19 command registrations |
@@ -173,7 +173,7 @@ Dev machine uses `projects.yaml` with different local paths.
 ```bash
 just test-quick                           # skip Docker, stop on first failure
 just test-security                        # security-critical tests only
-pytest tests/ -v                          # all 826 tests (790 pass, 36 skip)
+pytest tests/ -v                          # all 836 tests (800 pass, 36 skip)
 pytest tests/ -v -k "not docker"          # skip Docker-required tests
 pytest tests/test_sandbox.py -v           # sandbox + AST scanner + written-file scanning
 pytest tests/test_rag.py -v              # RAG context layer (22 tests)

@@ -213,6 +213,14 @@ Files generated: {', '.join(Path(f).name for f in artifacts if Path(f).exists())
         if suggestion:
             summary += f"\n\n{suggestion}"
 
+    # Suggest ARCHITECTURE.md for successful project tasks that don't have one
+    if task_type == "project" and verdict == "pass":
+        project_path = state.get("project_config", {}).get("path", "")
+        if project_path:
+            arch_path = Path(project_path) / "ARCHITECTURE.md"
+            if not arch_path.is_file():
+                summary += "\n\n_Tip: This project has no ARCHITECTURE.md yet. Consider creating one to improve future task planning._"
+
     # L-12: Ensure total response stays within Telegram message limit
     if len(summary) > config.TELEGRAM_MAX_MESSAGE_LENGTH - 200:
         summary = summary[:config.TELEGRAM_MAX_MESSAGE_LENGTH - 200] + "\n\n(truncated)"

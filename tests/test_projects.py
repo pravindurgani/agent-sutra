@@ -100,3 +100,34 @@ class TestMatchProjectPositiveMatching:
         result = match_project("Launch sensispend")
         assert result is not None
         assert result["name"] == "SensiSpend V2"
+
+
+# ── v9.0.0 Phase 6: run_instructions in project context ──────────
+
+
+class TestProjectContextRunInstructions:
+    """get_project_context() includes run_instructions when present."""
+
+    def test_project_context_includes_run_instructions(self) -> None:
+        """Project with run_instructions → context contains 'Run Instructions:'."""
+        from tools.projects import get_project_context
+        project = {
+            "name": "iGaming Intelligence Dashboard",
+            "path": "/tmp/igaming",
+            "commands": {"pipeline": "python3 run_pipeline.py"},
+            "run_instructions": "IMPORTANT: run_pipeline.py REQUIRES --full-pipeline flag.\n",
+        }
+        context = get_project_context(project)
+        assert "Run Instructions:" in context
+        assert "--full-pipeline" in context
+
+    def test_project_context_without_run_instructions(self) -> None:
+        """Project without run_instructions → context does not contain it."""
+        from tools.projects import get_project_context
+        project = {
+            "name": "Affiliate Job Scraper",
+            "path": "/tmp/scraper",
+            "commands": {"scrape": "python3 main.py"},
+        }
+        context = get_project_context(project)
+        assert "Run Instructions:" not in context

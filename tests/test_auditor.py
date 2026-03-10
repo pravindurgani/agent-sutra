@@ -243,6 +243,98 @@ class TestAuditDataSanity:
         """AUDIT_CRITERIA["data"] must reference data sanity validation."""
         from brain.nodes.auditor import AUDIT_CRITERIA
         data_criteria = AUDIT_CRITERIA["data"]
-        assert "DATA SANITY" in data_criteria
-        assert "zero-denominator" in data_criteria
+        assert "DATA INTEGRITY" in data_criteria
         assert "mathematically impossible" in data_criteria
+        assert "sample data substituted" in data_criteria
+
+
+# ── v9.0.0 Phase 7: Audit criteria expansion ─────────────────────
+
+
+class TestAuditCriteriaExpansion:
+    """Expanded AUDIT_CRITERIA for frontend, data, and project tasks."""
+
+    @patch("brain.nodes.auditor.claude_client.call")
+    def test_frontend_audit_detects_truncated_html(self, mock_call):
+        """Frontend HTML missing </html> → verdict=fail."""
+        mock_call.return_value = json.dumps({
+            "verdict": "fail",
+            "feedback": "Code appears truncated: </html> is missing at the end of the file.",
+        })
+        from brain.nodes.auditor import audit
+        state = {
+            "task_id": "frontend-trunc-test",
+            "message": "Build a React dashboard",
+            "task_type": "frontend",
+            "plan": "Create single-page React app with Tailwind",
+            "code": '<!DOCTYPE html><html><head></head><body><div id="root"></div><script>',
+            "execution_result": "Execution: OK (exit code 0)\nStdout:\nServer started",
+            "retry_count": 0,
+            "audit_feedback": "",
+        }
+        result = audit(state)
+        assert result["audit_verdict"] == "fail"
+
+    @patch("brain.nodes.auditor.claude_client.call")
+    def test_data_audit_detects_impossible_rate(self, mock_call):
+        """Data with CTR: 11600% → verdict=fail."""
+        mock_call.return_value = json.dumps({
+            "verdict": "fail",
+            "feedback": "Data integrity failure: CTR of 11600% with 0 impressions is mathematically impossible.",
+        })
+        from brain.nodes.auditor import audit
+        state = {
+            "task_id": "data-rate-test",
+            "message": "Analyse campaign performance",
+            "task_type": "data",
+            "plan": "Read CSV, compute metrics",
+            "code": "import pandas as pd\ndf = pd.read_csv('data.csv')",
+            "execution_result": (
+                "Execution: OK (exit code 0)\nStdout:\n"
+                "Impressions: 0\nClicks: 91499\nCTR: 11600%"
+            ),
+            "retry_count": 0,
+            "audit_feedback": "",
+        }
+        result = audit(state)
+        assert result["audit_verdict"] == "fail"
+
+    @patch("brain.nodes.auditor.claude_client.call")
+    def test_project_audit_checks_correct_arguments(self, mock_call):
+        """Project with wrong pipeline args → verdict=fail."""
+        mock_call.return_value = json.dumps({
+            "verdict": "fail",
+            "feedback": "Wrong arguments: command used '--client Acme' but task specified 'Light & Wonder'.",
+        })
+        from brain.nodes.auditor import audit
+        state = {
+            "task_id": "project-args-test",
+            "message": "Run the report for Light & Wonder",
+            "task_type": "project",
+            "plan": "Execute report pipeline with client=Light & Wonder",
+            "code": "python run.py --client Acme",
+            "execution_result": (
+                "Execution: OK (exit code 0)\nStdout:\n"
+                "Report generated for Acme Corp"
+            ),
+            "extracted_params": {"client": "Light & Wonder"},
+            "retry_count": 0,
+            "audit_feedback": "",
+        }
+        result = audit(state)
+        assert result["audit_verdict"] == "fail"
+
+    def test_frontend_criteria_includes_truncation_check(self):
+        """AUDIT_CRITERIA["frontend"] must check for HTML completeness."""
+        from brain.nodes.auditor import AUDIT_CRITERIA
+        frontend = AUDIT_CRITERIA["frontend"]
+        assert "</html>" in frontend
+        assert "truncated" in frontend.lower()
+
+    def test_project_criteria_includes_run_instructions(self):
+        """AUDIT_CRITERIA["project"] must check run_instructions compliance."""
+        from brain.nodes.auditor import AUDIT_CRITERIA
+        project = AUDIT_CRITERIA["project"]
+        assert "run_instructions" in project
+        assert "Do NOT look for" in project
+        assert "ALL ASSERTIONS PASSED" in project

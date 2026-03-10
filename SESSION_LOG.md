@@ -367,3 +367,32 @@ Keep entries concise. Do not delete old entries.
 <!-- session ended: 2026-03-10 10:30 -->
 
 <!-- session ended: 2026-03-10 10:39 -->
+
+### 2026-03-10 — Phase 7: audit criteria expansion
+- **Done**: Expanded 3 `AUDIT_CRITERIA` entries in `auditor.py`. Frontend: added HTML completeness (points 8-9) and truncation in FAIL criteria. Data: replaced DATA SANITY with DATA INTEGRITY + real-vs-mock check (points 6-7), updated FAIL criteria. Project: added run_instructions compliance + data plausibility (points 6-7), updated FAIL criteria. 5 new tests (3 mocked Opus + 2 prompt content). Updated Phase 2 test assertion to match renamed keyword.
+- **Decisions**: Renamed data criteria keyword from "DATA SANITY" to "DATA INTEGRITY" per plan spec (Phase 2's SYSTEM_BASE keeps "DATA SANITY CHECK" — intentional differentiation). Added 2 extra prompt-content tests beyond the 3 specified for regression coverage.
+- **Next**: Phase 6 (YAML run_instructions)
+
+<!-- session ended: 2026-03-10 10:45 -->
+
+<!-- session ended: 2026-03-10 10:48 -->
+
+### 2026-03-10 — Phase 6: project pipeline arguments via YAML
+- **Done**: Added `run_instructions` injection to `get_project_context()` in `tools/projects.py`. 2 new tests in `test_projects.py`. `projects_macmini.yaml` edit blocked by pre-commit hook (protected file) — YAML change needs manual application.
+- **Decisions**: Placed run_instructions after commands and before requires_file in context output. Used `.strip()` to remove trailing newlines from YAML multiline strings.
+- **Next**: Phase 8 (ARCHITECTURE.md convention). Manual step: apply `run_instructions` to iGaming Intelligence Dashboard entry in `projects_macmini.yaml`.
+
+<!-- session ended: 2026-03-10 10:51 -->
+
+<!-- session ended: 2026-03-10 10:55 -->
+
+### 2026-03-10 — Phase 8: ARCHITECTURE.md per-project convention
+- **Done**: Planner injects ARCHITECTURE.md for project tasks (before RAG, capped at 5000 chars, OSError-safe). Deliverer suggests creating one for successful project tasks without it. Proof of concept: wrote 84-line ARCHITECTURE.md for iGaming Intelligence Dashboard. 3 new tests in `test_planner.py` (new file). Updated CLAUDE.md.
+- **Decisions**: Injection placed between project memory and RAG injection — structural context before code fragments. Deliverer tip placed before Telegram length limit check. ARCHITECTURE.md CLI flags based on actual `run_pipeline.py` argparse (--no-dashboard, --skip-scrape, --headless), not the inferred flags from IMPLEMENTATION_PLAN.md.
+- **Next**: Phase 9 (Ollama health monitoring)
+
+<!-- session ended: 2026-03-10 10:59 -->
+
+<!-- session ended: 2026-03-10 11:26 -->
+
+<!-- session ended: 2026-03-10 11:28 -->

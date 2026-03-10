@@ -105,6 +105,9 @@ def get_project_context(project: dict) -> str:
         for name, cmd in commands.items():
             lines.append(f"  - {name}: {cmd}")
 
+    if project.get("run_instructions"):
+        lines.append(f"Run Instructions:\n{project['run_instructions'].strip()}")
+
     if project.get("requires_file"):
         lines.append("NOTE: This project requires a file upload to work.")
 

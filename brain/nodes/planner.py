@@ -223,6 +223,17 @@ def plan(state: AgentState) -> dict:
                 f"{lessons}"
             )
 
+    # Inject project ARCHITECTURE.md if it exists (read before RAG for structural context)
+    if task_type == "project" and state.get("project_config", {}).get("path"):
+        arch_path = Path(state["project_config"]["path"]) / "ARCHITECTURE.md"
+        if arch_path.is_file():
+            try:
+                arch_content = arch_path.read_text(encoding="utf-8", errors="replace")[:5000]
+                system += f"\n\nPROJECT ARCHITECTURE ({state.get('project_name', 'unknown')}):\n{arch_content}"
+                logger.info("Injected ARCHITECTURE.md for %s (%d chars)", state.get("project_name"), len(arch_content))
+            except OSError as e:
+                logger.warning("Failed to read ARCHITECTURE.md: %s", e)
+
     # Inject relevant source files for project tasks (costs ~$0.02 per call)
     if task_type == "project" and state.get("project_config", {}).get("path"):
         system = _inject_project_files(state, system)

@@ -75,22 +75,25 @@ Evaluate:
 3. Did all data validation assertions pass? Look for "ALL ASSERTIONS PASSED".
 4. Were output files (charts, CSVs) generated?
 5. Are there tracebacks or errors?
-6. DATA SANITY: Are percentages between 0–100%? Are derived metrics consistent with source data (e.g., CTR = clicks/impressions, so impressions must be > 0 if clicks > 0)? Are there zero-denominator artifacts?
+6. DATA INTEGRITY: Are percentages between 0–100%? Are counts non-negative? If impressions=0, are clicks also 0? If a rate exceeds 1000%, flag as likely column misalignment.
+7. Does the output contain the ACTUAL data requested, not sample/mock/placeholder data?
 
-FAIL if: non-zero exit code, assertion failures, no output files when expected, traceback present, mathematically impossible values in output data.""",
+FAIL if: non-zero exit code, assertion failures, no output files when expected, traceback present, mathematically impossible values, sample data substituted for real data.""",
 
     "project": """
 Evaluate:
 1. Did the project command execute successfully (exit code 0)?
-2. Were the correct parameters extracted and used (check the command for proper client name, file paths)?
+2. Were the correct parameters extracted and used (check the command for proper client name, file paths, flags)?
 3. Did the command produce expected output files?
 4. Is the stdout output meaningful (not empty or error-only)?
 5. Were there any errors or warnings that indicate failure?
+6. Did the command use the CORRECT arguments as specified in the project's run_instructions?
+7. If the task involves data processing: are output metrics plausible (no impossible percentages, no zero-denominator rates)?
 
 NOTE: Project commands do NOT use Python assert statements. Do NOT look for "ALL ASSERTIONS PASSED".
-Instead, check: exit code 0, expected files created, meaningful output in stdout.
+Instead, check: exit code 0, expected files created, meaningful output in stdout, correct arguments used.
 
-FAIL if: non-zero exit code, wrong parameters used, no output files when expected, error messages in output.""",
+FAIL if: non-zero exit code, wrong parameters used, no output files when expected, error messages in output, impossible data values in output.""",
 
     "ui_design": """
 Evaluate:
@@ -123,14 +126,16 @@ FAIL if: non-zero exit code, no results produced, assertion failures, unhandled 
     "frontend": """
 Evaluate:
 1. Was an HTML file generated?
-2. Does the HTML contain proper structure (<!DOCTYPE html>, <html>, <head>, <body>)?
+2. Does the HTML contain proper structure (<!DOCTYPE html>, <html>, <head>, <body>, </html>)?
 3. Does it include Tailwind CSS (CDN link present)?
 4. For React apps: are React, ReactDOM, and Babel CDN scripts included?
 5. Does it implement the requested features (components, interactivity, data display)?
 6. Is it self-contained (no broken external dependencies, all via CDN)?
 7. Is it responsive (mobile-first breakpoints)?
+8. Is the HTML COMPLETE? Check that </html> is present at the end. If the code ends mid-tag or mid-script, FAIL with "code appears truncated".
+9. Are all <script> blocks closed with </script>? Are all <style> blocks closed with </style>?
 
-FAIL if: no HTML file generated, broken HTML structure, missing Tailwind/React CDN, doesn't implement requested features.""",
+FAIL if: no HTML file generated, broken HTML structure, missing Tailwind/React CDN, doesn't implement requested features, code appears truncated (missing </html>).""",
 }
 
 

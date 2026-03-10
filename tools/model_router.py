@@ -21,6 +21,24 @@ from tools.claude_client import MODEL_COSTS as _MODEL_COSTS
 
 logger = logging.getLogger(__name__)
 
+# Ollama reliability counters (reset on process restart)
+_ollama_stats = {
+    "calls": 0,
+    "empty_responses": 0,
+    "errors": 0,
+    "fallbacks_to_claude": 0,
+}
+
+
+def get_ollama_stats() -> dict:
+    """Return Ollama reliability counters for /health display."""
+    total = _ollama_stats["calls"]
+    failures = _ollama_stats["empty_responses"] + _ollama_stats["errors"]
+    return {
+        **_ollama_stats,
+        "reliability_pct": round((1 - failures / max(total, 1)) * 100, 1),
+    }
+
 
 def route_and_call(
     prompt: str,
@@ -38,10 +56,12 @@ def route_and_call(
 
     if provider == "ollama":
         for attempt in range(2):
+            _ollama_stats["calls"] += 1
             try:
                 result = _call_ollama(prompt, system, model, max_tokens)
                 if result.strip():
                     return result
+                _ollama_stats["empty_responses"] += 1
                 logger.warning(
                     "Ollama empty response (attempt %d/2), %s",
                     attempt + 1, "retrying" if attempt == 0 else "falling back to Claude",
@@ -49,8 +69,10 @@ def route_and_call(
                 if attempt == 0:
                     time.sleep(2)
             except Exception as e:
+                _ollama_stats["errors"] += 1
                 logger.warning("Ollama failed: %s, falling back to Claude", e)
                 break
+        _ollama_stats["fallbacks_to_claude"] += 1
         provider, model = "claude", config.DEFAULT_MODEL
 
     # Claude path

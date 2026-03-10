@@ -396,3 +396,14 @@ Keep entries concise. Do not delete old entries.
 <!-- session ended: 2026-03-10 11:26 -->
 
 <!-- session ended: 2026-03-10 11:28 -->
+
+### 2026-03-10 — Phase 9: Ollama health monitoring
+- **Done**: Added `_ollama_stats` module-level dict and `get_ollama_stats()` getter to `model_router.py`. Instrumented `route_and_call()` with counter increments at call/empty/error/fallback points. Added Ollama reliability section to `/health` handler (conditional on calls > 0). 4 new tests in `test_model_router.py`. Updated CLAUDE.md.
+- **Decisions**: Used mutable dict pattern (no `global` declarations) matching existing `_client = None` singleton style. Added `test_ollama_reliability_zero_calls` as a 4th test beyond the 3 specified for edge case coverage. `/health` display wrapped in `try/except` to never crash the command.
+- **Next**: Batch 3 complete (7, 6, 8, 9). All v9.0.0 phases implemented. Ready for post-implementation review and test run.
+
+<!-- session ended: 2026-03-10 11:33 -->
+
+<!-- session ended: 2026-03-10 11:37 -->
+
+<!-- session ended: 2026-03-10 11:42 -->

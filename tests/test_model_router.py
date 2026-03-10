@@ -1,4 +1,4 @@
-"""Tests for tools/model_router.py — cost defaults, budget escalation, Ollama think-stripping."""
+"""Tests for tools/model_router.py — cost defaults, budget escalation, Ollama think-stripping, stats."""
 from __future__ import annotations
 
 import sys
@@ -9,7 +9,7 @@ import time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from unittest.mock import patch
-from tools.model_router import _get_today_spend, _select_model, _call_ollama
+from tools.model_router import _get_today_spend, _select_model, _call_ollama, _ollama_stats, get_ollama_stats
 
 
 class TestGetTodaySpend:
@@ -149,3 +149,62 @@ class TestOllamaThinkStripping:
         }
         result = _call_ollama("test prompt", "", "deepseek-r1:14b", 2000)
         assert result == ""
+
+
+# ── v9.0.0 Phase 9: Ollama health monitoring stats ───────────────
+
+
+def _reset_ollama_stats():
+    """Reset stats to zero for test isolation."""
+    for key in _ollama_stats:
+        _ollama_stats[key] = 0
+
+
+class TestOllamaStats:
+    """Ollama reliability counters and percentage calculation."""
+
+    def setup_method(self):
+        _reset_ollama_stats()
+
+    @patch("tools.model_router.claude_client.call", return_value="claude response")
+    @patch("tools.model_router._call_ollama", return_value="")
+    @patch("tools.model_router._select_model", return_value=("ollama", "qwen2.5:7b"))
+    @patch("tools.model_router.time.sleep")
+    def test_ollama_stats_increment_on_empty(self, mock_sleep, mock_select, mock_ollama, mock_claude):
+        """Ollama returning empty → empty_responses incremented."""
+        from tools.model_router import route_and_call
+        route_and_call("test", purpose="classify", complexity="low")
+        assert _ollama_stats["empty_responses"] == 2  # 2 attempts, both empty
+        assert _ollama_stats["calls"] == 2
+        assert _ollama_stats["fallbacks_to_claude"] == 1
+
+    @patch("tools.model_router.claude_client.call", return_value="claude response")
+    @patch("tools.model_router._call_ollama", side_effect=ConnectionError("refused"))
+    @patch("tools.model_router._select_model", return_value=("ollama", "qwen2.5:7b"))
+    def test_ollama_stats_increment_on_fallback(self, mock_select, mock_ollama, mock_claude):
+        """Ollama failing → errors and fallbacks_to_claude incremented."""
+        from tools.model_router import route_and_call
+        route_and_call("test", purpose="classify", complexity="low")
+        assert _ollama_stats["errors"] == 1
+        assert _ollama_stats["fallbacks_to_claude"] == 1
+        assert _ollama_stats["calls"] == 1
+
+    def test_ollama_reliability_calculation(self):
+        """Manual counter values → reliability percentage correct."""
+        _ollama_stats["calls"] = 100
+        _ollama_stats["empty_responses"] = 10
+        _ollama_stats["errors"] = 5
+        _ollama_stats["fallbacks_to_claude"] = 12
+
+        stats = get_ollama_stats()
+        assert stats["calls"] == 100
+        assert stats["empty_responses"] == 10
+        assert stats["errors"] == 5
+        assert stats["fallbacks_to_claude"] == 12
+        # reliability = (1 - (10 + 5) / 100) * 100 = 85.0%
+        assert stats["reliability_pct"] == 85.0
+
+    def test_ollama_reliability_zero_calls(self):
+        """Zero calls → 100% reliability (no failures)."""
+        stats = get_ollama_stats()
+        assert stats["reliability_pct"] == 100.0

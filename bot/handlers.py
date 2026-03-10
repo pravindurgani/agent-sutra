@@ -481,6 +481,20 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         pass  # Pipeline stats are informational, never crash /health
 
+    # Ollama reliability stats (only show if Ollama has been called)
+    try:
+        from tools.model_router import get_ollama_stats
+        ollama = get_ollama_stats()
+        if ollama["calls"] > 0:
+            lines.append(
+                f"\nOllama Reliability:\n"
+                f"  Calls: {ollama['calls']} | Empty: {ollama['empty_responses']} | "
+                f"Errors: {ollama['errors']} | Claude fallbacks: {ollama['fallbacks_to_claude']}\n"
+                f"  Reliability: {ollama['reliability_pct']}%"
+            )
+    except Exception:
+        pass  # Stats are informational, never crash /health
+
     await update.message.reply_text("\n".join(lines))
 
 

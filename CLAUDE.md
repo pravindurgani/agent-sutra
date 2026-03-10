@@ -3,7 +3,7 @@
 Single-user, self-hosted AI agent. Telegram-controlled. Mac Mini M2 (16GB).
 Fixed 5-stage LangGraph pipeline: Classify → Plan → Execute → Audit → Deliver.
 Cross-model adversarial auditing: Sonnet generates, Opus reviews.
-~7,876 LOC across 21 source files. ~11,000 LOC tests across 29 files. 836 test functions (800 passing, 36 skipped).
+~7,876 LOC across 21 source files. ~11,000 LOC tests across 29 files. 840 test functions (804 passing, 36 skipped).
 
 ## Architecture
 
@@ -29,7 +29,7 @@ Cross-model adversarial auditing: Sonnet generates, Opus reviews.
 | `brain/nodes/deliverer.py` | 438 | Response formatting, memory extraction, temporal mining, debug sidecar, credential filter (expanded), path sanitisation (Linux+macOS), ARCHITECTURE.md suggestion |
 | `tools/sandbox.py` | 1684 | Execution sandbox: AST scanner, smart subprocess, importlib allowlist, shutil.rmtree hardening, written-file scanning, Docker, streaming, server mgmt |
 | `tools/rag.py` | 324 | RAG context layer: LanceDB index, Ollama embeddings, AST-based Python chunking, query/build, zero-vector filtering |
-| `tools/model_router.py` | 224 | Claude/Ollama routing by purpose, complexity, RAM, budget, empty response retry, unclosed think-block handling |
+| `tools/model_router.py` | 246 | Claude/Ollama routing by purpose, complexity, RAM, budget, empty response retry, unclosed think-block handling, Ollama reliability stats |
 | `tools/claude_client.py` | 425 | Anthropic API wrapper: retries, cost tracking, streaming, midnight-based budget, daily breakdown, budget remaining |
 | `tools/file_manager.py` | 157 | Upload handling, metadata extraction, content reading, JSON size cap |
 | `tools/deployer.py` | 235 | Static deployment: GitHub Pages, Vercel, Firebase, credential-safe subprocess |
@@ -38,7 +38,7 @@ Cross-model adversarial auditing: Sonnet generates, Opus reviews.
 | `storage/db.py` | 468 | SQLite ops: async (bot) + sync (pipeline), 5 tables, WAL mode, history FIFO cap, partial state persistence |
 | `scheduler/cron.py` | 67 | APScheduler with SQLite persistence, prefix-length validation |
 | `bot/telegram_bot.py` | 69 | Bot factory, 19 command registrations |
-| `bot/handlers.py` | 1474 | All Telegram command handlers, auth, message processing, chain (refusal tracking), retry, setup, reindex, cost analytics, timeout progress feedback |
+| `bot/handlers.py` | 1488 | All Telegram command handlers, auth, message processing, chain (refusal tracking), retry, setup, reindex, cost analytics, timeout progress feedback, Ollama health stats |
 
 ## Pipeline Flow
 
@@ -173,7 +173,7 @@ Dev machine uses `projects.yaml` with different local paths.
 ```bash
 just test-quick                           # skip Docker, stop on first failure
 just test-security                        # security-critical tests only
-pytest tests/ -v                          # all 836 tests (800 pass, 36 skip)
+pytest tests/ -v                          # all 840 tests (804 pass, 36 skip)
 pytest tests/ -v -k "not docker"          # skip Docker-required tests
 pytest tests/test_sandbox.py -v           # sandbox + AST scanner + written-file scanning
 pytest tests/test_rag.py -v              # RAG context layer (22 tests)

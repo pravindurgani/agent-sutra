@@ -881,7 +881,7 @@ class TestInstrumentedRouting:
 
             provider, model = _select_model("classify", "low")
             assert provider == "ollama"
-            assert model == config.OLLAMA_DEFAULT_MODEL
+            assert model == config.OLLAMA_CLASSIFY_MODEL
 
     def test_audit_always_opus_regardless_of_ram(self):
         """Audit tasks MUST always use Opus — never Ollama."""

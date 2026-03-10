@@ -243,3 +243,71 @@ Keep entries concise. Do not delete old entries.
 <!-- session ended: 2026-03-09 11:53 -->
 
 <!-- session ended: 2026-03-09 11:56 -->
+
+<!-- session ended: 2026-03-09 11:58 -->
+
+<!-- session ended: 2026-03-09 12:04 -->
+
+<!-- session ended: 2026-03-09 12:12 -->
+
+<!-- session ended: 2026-03-09 12:16 -->
+
+<!-- session ended: 2026-03-09 12:21 -->
+
+<!-- session ended: 2026-03-09 18:27 -->
+
+<!-- session ended: 2026-03-09 22:47 -->
+
+<!-- session ended: 2026-03-09 23:05 -->
+
+<!-- session ended: 2026-03-09 23:12 -->
+
+<!-- session ended: 2026-03-09 23:14 -->
+
+<!-- session ended: 2026-03-09 23:18 -->
+
+<!-- session ended: 2026-03-09 23:33 -->
+
+<!-- session ended: 2026-03-09 23:47 -->
+
+<!-- session ended: 2026-03-09 23:53 -->
+
+<!-- session ended: 2026-03-09 23:55 -->
+
+<!-- session ended: 2026-03-09 23:58 -->
+
+<!-- session ended: 2026-03-10 00:00 -->
+
+<!-- session ended: 2026-03-10 00:01 -->
+
+<!-- session ended: 2026-03-10 00:03 -->
+
+### 2026-03-10 — Phase 0c: LONG_TIMEOUT increase to 1800s
+- **Done**: Changed `config.py:78` LONG_TIMEOUT default from 900 to 1800. Updated CLAUDE.md config table.
+- **Decisions**: 1800s covers longest observed task (1440s BTC dashboard) with 25% margin. Can reduce after Phase 0a improves planning latency.
+- **Next**: Phases 0a, 0b, 0d (remaining P0 quick wins)
+
+<!-- session ended: 2026-03-10 00:11 -->
+
+### 2026-03-10 — Phase 0a: Purpose-dependent Ollama model routing
+- **Done**: Added `OLLAMA_CLASSIFY_MODEL` config (default `qwen2.5:7b`). Updated `_select_model()` to route classify to qwen, plan to deepseek. 4 new tests + 2 existing test fixes. Updated CLAUDE.md file map, config table, env vars.
+- **Decisions**: qwen2.5:7b chosen for classify — ~4.5GB vs ~9GB for deepseek-r1:14b, no `<think>` blocks, ~6-10s vs 30-55s latency. Plan stays on deepseek for reasoning quality.
+- **Next**: Phases 0b, 0d (remaining P0 quick wins), then P1 sequential phases
+
+<!-- session ended: 2026-03-10 00:22 -->
+
+### 2026-03-10 — Phase 0d: Refine plan complexity routing
+- **Done**: Changed `planner.py:266` so only `frontend`, `ui_design`, `data` get `complexity="high"` (Sonnet); `code`, `automation`, `file`, `project` get `"low"` (Ollama-eligible). 3 new tests in `test_v8_context.py`. Updated CLAUDE.md pipeline table.
+- **Decisions**: Project tasks already ran at low complexity; the real change is `code`/`automation`/`file` dropping from high→low. These tasks produce straightforward plans that don't need Sonnet-level reasoning.
+- **Next**: Phases 0b, 1-9 (remaining v9.0.0 phases)
+
+<!-- session ended: 2026-03-10 01:12 -->
+
+### 2026-03-10 — Phase 0b: Classifier trigger context-awareness
+- **Done**: Added `_MENTION_CONTEXTS` set and context-exclusion logic to `match_project()` in `tools/projects.py`. Triggers after words like "about", "for", "featuring", "including" are skipped. Checks last 3 prefix words (not just last) to handle multi-word triggers like "for Affiliate Job Scraper". Created `tests/test_projects.py` with 7 tests. Updated CLAUDE.md file map, test counts.
+- **Decisions**: Extended prefix check from last-word-only to last-3-words to handle cases where shorter sub-triggers ("job scraper") would bypass context exclusion when a longer trigger ("affiliate job scraper") was correctly blocked.
+- **Next**: Phases 1-9 (remaining v9.0.0 phases)
+
+<!-- session ended: 2026-03-10 08:35 -->
+
+<!-- session ended: 2026-03-10 09:13 -->

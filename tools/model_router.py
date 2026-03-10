@@ -79,12 +79,14 @@ def _select_model(purpose: str, complexity: str) -> tuple[str, str]:
     # Also check RAM: don't route to Ollama under critical memory pressure
     if purpose in ("classify", "plan") and complexity != "high" and _daily_spend_exceeds_threshold(0.7):
         if _ollama_available() and _ram_below_threshold(90):
-            return ("ollama", config.OLLAMA_DEFAULT_MODEL)
+            model = config.OLLAMA_CLASSIFY_MODEL if purpose == "classify" else config.OLLAMA_DEFAULT_MODEL
+            return ("ollama", model)
 
     # Rule (c): Low-complexity classify/plan → try Ollama
     if purpose in ("classify", "plan") and complexity == "low":
         if _ollama_available() and _ram_below_threshold(75):
-            return ("ollama", config.OLLAMA_DEFAULT_MODEL)
+            model = config.OLLAMA_CLASSIFY_MODEL if purpose == "classify" else config.OLLAMA_DEFAULT_MODEL
+            return ("ollama", model)
 
     # Rule (e): Default → Sonnet
     return ("claude", config.DEFAULT_MODEL)

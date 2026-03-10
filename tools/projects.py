@@ -13,6 +13,10 @@ logger = logging.getLogger(__name__)
 _REGISTRY_PATH = config.BASE_DIR / "projects.yaml"
 _projects: list[dict] = []
 
+# Phrases that indicate the trigger is being MENTIONED, not invoked
+_MENTION_CONTEXTS = {"about", "for", "card", "showing", "including", "like",
+                     "such as", "called", "named", "titled", "featuring"}
+
 
 def load_projects() -> list[dict]:
     """Load project registry from projects.yaml."""
@@ -40,9 +44,12 @@ def get_projects() -> list[dict]:
 def match_project(message: str) -> Optional[dict]:
     """Find a project matching the user's message via trigger keywords.
 
+    Uses positional and contextual signals to avoid matching triggers
+    that appear inside descriptive text rather than as task commands.
+
     Returns the matched project dict or None.
     """
-    msg_lower = message.lower()
+    msg_lower = message.lower().strip()
     projects = get_projects()
 
     best_match = None
@@ -52,14 +59,28 @@ def match_project(message: str) -> Optional[dict]:
         triggers = project.get("triggers", [])
         score = 0
         for trigger in triggers:
-            trig_lower = trigger.lower()
+            trig_lower = trigger.lower().strip()
+            if not trig_lower:
+                continue
+
             # A-36: Use word-boundary regex for short triggers to prevent false matches
             if len(trig_lower) < 4:
-                if re.search(rf'\b{re.escape(trig_lower)}\b', msg_lower):
-                    score = max(score, len(trigger))
-            elif trig_lower in msg_lower:
-                # Longer trigger matches are more specific = higher score
-                score = max(score, len(trigger))
+                if not re.search(rf'\b{re.escape(trig_lower)}\b', msg_lower):
+                    continue
+            elif trig_lower not in msg_lower:
+                continue
+
+            # Context check: skip if trigger appears after a mention-context word
+            # Check last 3 prefix words to handle "for Affiliate Job Scraper"
+            # where shorter trigger "job scraper" has "affiliate" as last word
+            trig_pos = msg_lower.find(trig_lower)
+            if trig_pos > 0:
+                prefix = msg_lower[max(0, trig_pos - 30):trig_pos].strip()
+                prefix_words = prefix.split()
+                if any(w in _MENTION_CONTEXTS for w in prefix_words[-3:]):
+                    continue
+
+            score = max(score, len(trigger))
 
         if score > best_score:
             best_score = score

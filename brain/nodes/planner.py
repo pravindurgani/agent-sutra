@@ -262,8 +262,8 @@ def plan(state: AgentState) -> dict:
 
     # Enable thinking only for tasks that genuinely benefit from deep reasoning
     use_thinking = task_type in ("frontend", "ui_design")
-    # Route through model router — project tasks are low complexity (known commands)
-    plan_complexity = "low" if task_type == "project" else "high"
+    # Route through model router — only frontend/ui_design/data need Sonnet-level reasoning
+    plan_complexity = "high" if task_type in ("frontend", "ui_design", "data") else "low"
     response = route_and_call(
         prompt, system=system,
         purpose="plan", complexity=plan_complexity,

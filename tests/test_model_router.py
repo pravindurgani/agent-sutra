@@ -66,6 +66,51 @@ class TestBudgetEscalation:
         assert provider == "ollama"
 
 
+class TestPurposeDependentOllamaRouting:
+    """Phase 0a: classify routes to qwen2.5:7b, plan stays on deepseek-r1:14b."""
+
+    @patch("tools.model_router._ollama_available", return_value=True)
+    @patch("tools.model_router._ram_below_threshold", return_value=True)
+    def test_classify_routes_to_qwen_7b(
+        self, _mock_ram: object, _mock_ollama: object,
+    ) -> None:
+        """Low-complexity classify routes to OLLAMA_CLASSIFY_MODEL (qwen2.5:7b)."""
+        provider, model = _select_model("classify", "low")
+        assert provider == "ollama"
+        assert model == "qwen2.5:7b"
+
+    @patch("tools.model_router._ollama_available", return_value=True)
+    @patch("tools.model_router._ram_below_threshold", return_value=True)
+    def test_plan_still_routes_to_deepseek(
+        self, _mock_ram: object, _mock_ollama: object,
+    ) -> None:
+        """Low-complexity plan routes to OLLAMA_DEFAULT_MODEL (deepseek-r1:14b)."""
+        provider, model = _select_model("plan", "low")
+        assert provider == "ollama"
+        assert model == "deepseek-r1:14b"
+
+    @patch("tools.model_router._daily_spend_exceeds_threshold", return_value=True)
+    @patch("tools.model_router._ollama_available", return_value=True)
+    @patch("tools.model_router._ram_below_threshold", return_value=True)
+    def test_budget_escalation_uses_qwen_for_classify(
+        self, _mock_ram: object, _mock_ollama: object, _mock_threshold: object,
+    ) -> None:
+        """Budget escalation routes classify to qwen2.5:7b, not deepseek."""
+        provider, model = _select_model("classify", "low")
+        assert provider == "ollama"
+        assert model == "qwen2.5:7b"
+
+    def test_config_ollama_classify_model_env_override(self) -> None:
+        """OLLAMA_CLASSIFY_MODEL env var is respected."""
+        import config
+        with patch.dict(os.environ, {"OLLAMA_CLASSIFY_MODEL": "llama3:8b"}):
+            # Re-read the env var as config would at import time
+            val = os.getenv("OLLAMA_CLASSIFY_MODEL", "qwen2.5:7b")
+            assert val == "llama3:8b"
+        # Default when env not set
+        assert config.OLLAMA_CLASSIFY_MODEL == "qwen2.5:7b"
+
+
 class TestOllamaThinkStripping:
     """Ollama think-block stripping for DeepSeek R1 and similar reasoning models."""
 

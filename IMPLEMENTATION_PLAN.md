@@ -1,919 +1,1344 @@
-# AgentSutra v8.8.0 — Implementation Plan
+# AgentSutra v9.0.0 — Implementation Plan
 
-**Version:** 1.2
-**Date:** 2026-03-08
-**Source:** [AgentSutra_Improvements_Report.md](./AgentSutra_Improvements_Report.md) (v4, 2026-03-08)
-**Phases:** 14 (Phase 0–13)
-**Estimated total scope:** ~480 lines changed
-**Execution order:** Phase 0 first (all items parallelisable), then Phases 1–8 sequentially, then Phases 9–13 (parallelisable P2 items)
+**Version:** 2.3
+**Date:** 2026-03-10
+**Source:** [AgentSutra_Improvements_Report.md](./AgentSutra_Improvements_Report.md) (v8.8.0 Test Suite Execution Report, 2026-03-09)
+**Phases:** 11 (Phase 0–9, with Phase 4b)
+**Estimated total scope:** ~360 source lines + ~520 test lines across 13 files
+**Execution order:** Phase 0 first (P0 parallelisable), then Phases 1–5 sequentially (P1), then Phases 6–9 (P2 parallelisable)
+**Supersedes:** v1.2 plan (v8.8.0 phases 0–13, all completed or skipped)
+
+---
+
+## Context
+
+The v8.8.0 test suite execution report (48 prompts, 10 hours, Mac Mini M2) revealed 9 gaps (G-1 through G-9) and produced 8 fix recommendations (F-1 through F-8). This plan translates those findings into implementable phases with exact file locations, line numbers, code changes, and test specifications.
+
+**Key production data driving this plan:**
+- Planning latency: 65–380s actual vs 3–8s expected (8–31x slower)
+- Classification latency: 30–55s actual vs 0.3–1s expected (35–115x slower)
+- 111 Ollama empty responses during 10hr run (~450–660s wasted)
+- 5 timeouts caused by planning bottleneck (up to 1051s single planning cycle)
+- 3 false positives (PDF upload, psycopg2 subprocess, importlib)
+- 2 quality failures (Tugi Tark data corruption, credential grep fabrication)
+- 1 HTML truncation failure (Test 8.3, undetected across 3 retries)
 
 ---
 
 ## Execution Order Summary
 
 ```
-Phase 0  (P0 quick wins — all parallelisable)
-  ├── 0a: Shell truncation false-positive (F-1) — CRITICAL, unblocks all code gen
-  ├── 0b: /cost model name display (F-3)
-  ├── 0c: "Done" → "Processing" acknowledgment (3.2)
-  └── 0d: Harmonise cost defaults (9.4)
+Phase 0  (P0 quick wins — all parallelisable, do first)
+  ├── 0a: Purpose-dependent Ollama model routing (F-1, G-5, G-9)
+  ├── 0b: Classifier trigger context-awareness (F-2, G-2)
+  ├── 0c: LONG_TIMEOUT increase to 1800s (F-6, G-7)
+  └── 0d: Skip RAG for non-project tasks (G-1 partial)
 
-Phase 1  (P1 security — sequential: credential filter)
-Phase 2  (P1 security — sequential: fabrication guard)
-Phase 3  (P1 pipeline — sequential: budget escalation, F-5)
-Phase 4  (P1 pipeline — sequential: Ollama empty response handling)
-Phase 5  (P1 pipeline — sequential: file selector parse failures)
-Phase 6  (P1 UX — sequential: chain refusal status)
-Phase 7  (P1 UX — sequential: /deploy task type check)
-Phase 8  (P1 security — sequential: false positive subprocess blocks)
+Phase 1  (P1 — sequential: duplicate error early-exit)
+Phase 2  (P1 — sequential: audit data sanity checks)
+Phase 3  (P1 — sequential: HTML truncation detection)
+Phase 4  (P1 — sequential: importlib smart allowlist)
+Phase 4b (P1 — sequential: shutil.rmtree scanner hardening)
+Phase 5  (P1 — sequential: executor respects was_refused)
 
-Phase 9  (P2 — parallelisable: path sanitisation + Linux paths)
-Phase 10 (P2 — parallelisable: over-generation limits)
-Phase 11 (P2 — parallelisable: RAG zero-vector guard)
-Phase 12 (P2 — parallelisable: task completion log summary)
-Phase 13 (P2 — parallelisable: timeout progress feedback)
+Phase 6  (P2 — parallelisable: project pipeline arguments via YAML)
+Phase 7  (P2 — parallelisable: task-type-specific audit criteria expansion)
+Phase 8  (P2 — parallelisable: ARCHITECTURE.md per-project convention)
+Phase 9  (P2 — parallelisable: Ollama health monitoring)
 ```
 
 **Dependencies:**
-- Phase 0a must complete before Phases 2, 5, 8 (they involve code gen testing)
-- Phase 3 depends on Phase 0d (cost defaults must be consistent first)
-- All other phases are independent
+- Phase 0a must complete before Phase 9 (model routing must be stable before adding health checks)
+- All other phases are independent (Phase 2 and Phase 7 reinforce each other but neither requires the other)
 
 ---
 
-## Phase 0a — Fix Shell Truncation False-Positive on Python (F-1)
+## Phase 0a: Purpose-Dependent Ollama Model Routing
 
-**Why:** Report §9.1 (F-1). The `\bif\b` regex in `_detect_truncation()` matches Python's `if` keyword. Any Python code with >2 `if` statements triggers false shell truncation, causing 100% failure on non-trivial Python code gen. This is the single biggest blocker.
+**Fixes:** F-1, G-5 (classification latency), G-9 (Ollama empty responses)
+**Priority:** P0 | **Scope:** S (~35 lines) | **Risk:** Low
+**Files:** `config.py`, `tools/model_router.py`
 
-**What:** `brain/nodes/executor.py`, function `_detect_truncation()`, lines 91–97.
+### Problem
 
-**How:**
-1. Only apply the shell `if/fi` and `do/done` checks when the code starts with a shell shebang
-2. Check if the first non-empty, non-comment line matches `#!/bin/bash`, `#!/bin/sh`, `#!/usr/bin/env bash`, or `#!/usr/bin/env sh`
-3. If no shebang, skip the shell truncation checks entirely
+`deepseek-r1:14b` is used for all Ollama-routed tasks. It emits `<think>` reasoning blocks (20–40s) before a one-word classification answer. It consumes ~9GB RAM on 16GB M2, leaving ~7GB headroom — insufficient under sustained load (111 empty responses observed).
+
+### Root Cause
+
+`config.py:90` defines a single `OLLAMA_DEFAULT_MODEL = "deepseek-r1:14b"` used everywhere.
+`model_router.py:82,87` both return `config.OLLAMA_DEFAULT_MODEL` regardless of purpose.
+
+### Changes
+
+**config.py** — Add purpose-specific model config (after line 90):
 
 ```python
-# Replace lines 91-97 with:
-# 7D: Shell script truncation — only for actual shell scripts
-_is_shell = False
-for line in stripped.split("\n"):
-    line = line.strip()
-    if not line or line.startswith("#!"):
-        if line.startswith("#!") and ("bash" in line or "/sh" in line):
-            _is_shell = True
-        break
-    break  # first non-empty line isn't a shebang
+# Lines 89-90 currently:
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_DEFAULT_MODEL = os.getenv("OLLAMA_DEFAULT_MODEL", "deepseek-r1:14b")
 
-if _is_shell:
-    if_count = len(re.findall(r'\bif\b', stripped))
-    fi_count = len(re.findall(r'\bfi\b', stripped))
-    do_count = len(re.findall(r'\bdo\b', stripped))
-    done_count = len(re.findall(r'\bdone\b', stripped))
-    shell_truncated = (if_count > fi_count + 2) or (do_count > done_count + 1)
-    truncated = truncated or shell_truncated
+# Replace with:
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_DEFAULT_MODEL = os.getenv("OLLAMA_DEFAULT_MODEL", "deepseek-r1:14b")
+OLLAMA_CLASSIFY_MODEL = os.getenv("OLLAMA_CLASSIFY_MODEL", "qwen2.5:7b")
 ```
 
-**Known gap:** Shell scripts invoked via `bash script.sh` (no shebang) will skip the if/fi check. This is acceptable because: (1) the paren/bracket/brace/string checks still catch most truncation regardless of language, (2) AgentSutra's executor generates shebangs for shell scripts via `CODE_GEN_SYSTEM` prompt, and (3) the false-positive cost (100% failure on all Python code gen) vastly outweighs the false-negative risk (occasional missed shell truncation on shebang-less scripts).
+**model_router.py** — Purpose-dependent model selection in `_select_model()` (lines 67–90):
 
-**What NOT to do:**
-- Do NOT use heuristics like "check first 10 lines for `def`/`import`/`class`" — fragile against Python files starting with comments or docstrings
-- Do NOT remove shell truncation detection entirely — it catches real shell truncation
-- Do NOT create a separate `_is_shell_script()` utility function — inline is fine for this
+```python
+def _select_model(purpose: str, complexity: str) -> tuple[str, str]:
+    """Decide (provider, model) based on purpose, complexity, and resource state."""
 
-**Tests to add:**
-- `test_detect_truncation_python_many_ifs_not_truncated` — Python code with 20 `if` statements, no shebang → returns `False`
-- `test_detect_truncation_shell_script_unclosed_if` — Bash script with `#!/bin/bash` shebang, 5 `if` and 0 `fi` → returns `True`
-- `test_detect_truncation_shell_script_balanced` — Bash script with balanced if/fi → returns `False`
-- `test_detect_truncation_python_still_catches_parens` — Python code with unclosed parens still returns `True`
-- `test_detect_truncation_shell_no_shebang_unclosed_parens` — Shell-style code without shebang but with 5 unclosed parens → returns `True` (caught by paren check, not if/fi)
-- **Test file:** `tests/test_executor.py` (existing)
+    # Rule (a): Audit → ALWAYS Opus
+    if purpose == "audit":
+        return ("claude", config.COMPLEX_MODEL)
 
-**Acceptance criteria:**
-- `pytest tests/test_executor.py -k "truncation" -v` passes with 0 failures
-- Python code with 20+ `if` statements is NOT flagged as truncated
-- Shell scripts with genuine truncation ARE still flagged
+    # Rule (b): Code generation → ALWAYS Sonnet
+    if purpose == "code_gen":
+        return ("claude", config.DEFAULT_MODEL)
 
-**Verify:** `pytest tests/test_executor.py -k "truncation" -v`
+    # Rule (d): Budget escalation — check before complexity routing
+    if purpose in ("classify", "plan") and complexity != "high" and _daily_spend_exceeds_threshold(0.7):
+        if _ollama_available() and _ram_below_threshold(90):
+            model = config.OLLAMA_CLASSIFY_MODEL if purpose == "classify" else config.OLLAMA_DEFAULT_MODEL
+            return ("ollama", model)
 
-**Estimated scope:** S (<20 lines)
+    # Rule (c): Low-complexity classify/plan → try Ollama
+    if purpose in ("classify", "plan") and complexity == "low":
+        if _ollama_available() and _ram_below_threshold(75):
+            model = config.OLLAMA_CLASSIFY_MODEL if purpose == "classify" else config.OLLAMA_DEFAULT_MODEL
+            return ("ollama", model)
+
+    # Rule (e): Default → Sonnet
+    return ("claude", config.DEFAULT_MODEL)
+```
+
+### Expected Impact
+
+| Metric | Before | After |
+|--------|--------|-------|
+| Classify latency (Ollama) | 30–55s | ~6–10s |
+| Ollama RAM usage (classify) | ~9GB | ~4.5GB |
+| Free headroom on 16GB M2 | ~7GB | ~11.5GB |
+| Empty response rate | 111/run | Significantly reduced (RAM pressure relieved) |
+
+**Ollama empty response correlation:** Log analysis shows ~70/94 non-retry empty responses occur during classification phase. The remaining ~24 are retries of classify-phase calls. ~99% of empty responses are classification-time. This strongly supports switching classify to `qwen2.5:7b` (less RAM) as the primary fix for empty response rate, since the problem is almost entirely concentrated in the phase this change targets.
+
+### Pre-Requisite
+
+Run `ollama pull qwen2.5:7b` on Mac Mini before deploying. Verify with `ollama list`.
+
+### Tests to Add
+
+```
+tests/test_model_router.py:
+  test_classify_routes_to_qwen_7b()
+    — Mock Ollama available + RAM OK → assert model == "qwen2.5:7b" for purpose="classify"
+  test_plan_still_routes_to_deepseek()
+    — Mock Ollama available + RAM OK → assert model == "deepseek-r1:14b" for purpose="plan"
+  test_budget_escalation_uses_qwen_for_classify()
+    — Mock spend > 70% + Ollama available → assert classify model == "qwen2.5:7b"
+  test_config_ollama_classify_model_env_override()
+    — Set OLLAMA_CLASSIFY_MODEL env → assert config reads it
+```
+
+### Verification
+
+After deployment, run 5 classification tasks and check `agentsutra.log` for:
+```
+Routed classify (complexity=low) to ollama/qwen2.5:7b
+```
+Confirm classify times are <15s. Monitor empty response count over next 48hr run.
 
 ---
 
-## Phase 0b — Fix /cost Model Name Display (F-3)
+## Phase 0b: Classifier Trigger Context-Awareness
 
-**Why:** Report §9.2 (F-3). `model.split("-")[-1]` on `claude-sonnet-4-6` produces `"6"`, displayed as "6: $30.59 (100%)" — meaningless.
+**Fixes:** F-2, G-2 (classifier over-matching)
+**Priority:** P0 | **Scope:** S (~25 lines) | **Risk:** Low
+**Files:** `tools/projects.py`
 
-**What:** `tools/claude_client.py`, function `get_daily_cost_breakdown()`, line 373.
+**Note:** `classifier.py` calls `match_project()` from `projects.py` — the fix is entirely in `projects.py`. No changes needed in `classifier.py`.
 
-**How:**
+### Problem
+
+Test 10.1: "Design a portfolio page with cards for AgentSutra, iGaming Intelligence Dashboard" routed to the igaming project instead of generating a frontend page. The classifier's `match_project()` matches trigger keywords anywhere in the message, including inside descriptions of what the user wants to create.
+
+### Root Cause
+
+`projects.py:60` — `trig_lower in msg_lower` is a naive substring match with no positional context. Any mention of a project name triggers project routing.
+
+### Changes
+
+**tools/projects.py** — Add context-exclusion to `match_project()` (modify lines 40–70):
+
 ```python
-# Replace:
-short = model.split("-")[-1] if "-" in model else model
-# With:
-short = model.replace("claude-", "").rsplit("-", 1)[0] if model.startswith("claude-") else model
+# Phrases that indicate the trigger is being MENTIONED, not invoked
+_MENTION_CONTEXTS = {"about", "for", "card", "showing", "including", "like",
+                     "such as", "called", "named", "titled", "featuring"}
+
+def match_project(message: str) -> dict | None:
+    """Find best-matching project by trigger keywords in the message.
+
+    Uses positional and contextual signals to avoid matching triggers
+    that appear inside descriptive text rather than as task commands.
+    """
+    msg_lower = message.lower().strip()
+    projects = get_projects()
+    if not projects:
+        return None
+
+    best_score = 0
+    best_project = None
+
+    for project in projects:
+        for trigger in project.get("triggers", []):
+            trig_lower = trigger.lower().strip()
+            if not trig_lower:
+                continue
+
+            if len(trig_lower) < 4:
+                if not re.search(rf"\b{re.escape(trig_lower)}\b", msg_lower):
+                    continue
+            else:
+                if trig_lower not in msg_lower:
+                    continue
+
+            # Context check: skip if trigger appears after a mention-context word
+            # Find the position of the trigger in the message
+            trig_pos = msg_lower.find(trig_lower)
+            if trig_pos > 0:
+                # Get the 30 chars before the trigger match
+                prefix = msg_lower[max(0, trig_pos - 30):trig_pos].strip()
+                prefix_words = prefix.split()
+                if prefix_words and prefix_words[-1] in _MENTION_CONTEXTS:
+                    continue
+
+            score = len(trig_lower)
+            if score > best_score:
+                best_score = score
+                best_project = project
+
+    return best_project if best_project else None
 ```
 
-This produces `"sonnet-4"` from `claude-sonnet-4-6` and `"opus-4"` from `claude-opus-4-6`.
+### Edge Cases
 
-**What NOT to do:**
-- Do NOT create a `_format_model_name()` helper — this is a one-liner used in one place
-- Do NOT change how models are stored in the database — only the display format
-- Do NOT touch `MODEL_COSTS` keys or any other model string handling
+- "Run the iGaming Intelligence Dashboard" → trigger at position 8, prefix "run the" → no mention-context → MATCH (correct)
+- "Design a card about iGaming Intelligence Dashboard" → prefix "about" → SKIP (correct)
+- "Create a portfolio page with iGaming Intelligence Dashboard" → prefix "with" → MATCH (acceptable — "with" is not in `_MENTION_CONTEXTS`)
+- If "with" causes false positives in practice, add it to `_MENTION_CONTEXTS` later
 
-**Tests to add:**
-- `test_cost_summary_model_name_display` — mock `api_usage` rows with `claude-sonnet-4-6` and `claude-opus-4-6`, verify output contains `"sonnet-4"` and `"opus-4"`, not `"6"`
-- **Test file:** `tests/test_claude_client.py` (existing)
+### Tests to Add
 
-**Acceptance criteria:**
-- `/cost` command displays model names as `sonnet-4` and `opus-4`, not `6`
+```
+tests/test_projects.py:
+  test_match_project_does_not_match_in_description()
+    — "Design a card about iGaming Intelligence Dashboard" → returns None
+  test_match_project_does_not_match_after_for()
+    — "Create a page for Affiliate Job Scraper" → returns None
+  test_match_project_still_matches_command_position()
+    — "Run the affiliate job scraper" → returns project
+  test_match_project_still_matches_direct_trigger()
+    — "igaming intelligence dashboard" → returns project
+  test_match_project_skips_featuring_context()
+    — "Build a dashboard featuring sensispend" → returns None
+```
 
-**Verify:** `pytest tests/test_claude_client.py -k "cost" -v`
+### Verification
 
-**Estimated scope:** S (<5 lines)
+Run Test 10.1 equivalent: "Design a portfolio page with cards for AgentSutra, iGaming Intelligence Dashboard." Confirm classifier returns `task_type: "frontend"` (not `"project"`).
 
 ---
 
-## Phase 0c — Fix Misleading "Done" Acknowledgment (3.2)
+## Phase 0c: LONG_TIMEOUT Increase
 
-**Why:** Report §3.2. The bot sends `"Done. (task XXXX)"` when a task is *accepted*, then edits the same message to `"Done."` again on completion. The initial message is misleading — users think the task is already finished.
+**Fixes:** F-6, G-7 (5 tasks timed out at 900s but completed in background)
+**Priority:** P0 | **Scope:** XS (1 line) | **Risk:** None
+**Files:** `config.py`
 
-**What:** `bot/handlers.py`, lines 816 and 905.
+### Problem
 
-**How:**
+5 tasks hit the 900s bot handler timeout. All 5 eventually completed (1000–1440s). The pipeline finished, but the user saw "Task timed out."
+
+### Root Cause
+
+`config.py:78`: `LONG_TIMEOUT = _safe_int("LONG_TIMEOUT", 900)`
+
+900s is insufficient when a single planning cycle can take 1051s (Test 12.1).
+
+### Changes
+
+**config.py** line 78:
+
 ```python
-# Line 816 — change initial acknowledgment:
-status_msg = await update.message.reply_text(f"Processing... (task {task_id[:8]}){budget_warning}")
+# Before:
+LONG_TIMEOUT = _safe_int("LONG_TIMEOUT", 900)
 
-# Line 905 — completion message stays the same:
-await status_msg.edit_text(f"Done. (task {task_id[:8]})")
+# After:
+LONG_TIMEOUT = _safe_int("LONG_TIMEOUT", 1800)
 ```
 
-**What NOT to do:**
-- Do NOT add progress stages to the status message — that's Phase 12 territory (report §3.4)
-- Do NOT touch the retry handler messages — they already say "Retrying..."
-- Do NOT change the `/chain` status messages — separate issue
+### Why 1800s
 
-**Tests to add:**
-- No test needed — string-only change with no logic. Verified by manual Telegram interaction.
+- Longest observed task: 1440s (BTC dashboard). 1800s covers this with 25% margin.
+- Planning bottleneck will improve after Phase 0a (qwen2.5:7b), but 1800s provides safety margin during transition.
+- Can be reduced back to 1200s after Phase 0a is verified in production.
 
-**Acceptance criteria:**
-- Initial task acknowledgment says "Processing..." not "Done."
-- Completion message still says "Done."
+### Tests
 
-**Verify:** Manual: send a task via Telegram, observe the initial message says "Processing..."
-
-**Estimated scope:** S (<5 lines)
+No new tests needed. Existing timeout tests remain valid (they mock the constant).
 
 ---
 
-## Phase 0d — Harmonise Cost Defaults (9.4)
+## Phase 0d: Refine Plan Complexity Routing
 
-**Why:** Report §9.4. `_get_today_spend()` in `model_router.py:148` uses `{"input": 3.00, "output": 15.00}` as fallback for unknown models, while `_check_budget()` in `claude_client.py:119` uses `{"input": 15.00, "output": 75.00}`. This mismatch can cause budget threshold miscalculation.
+**Fixes:** G-1 (planning latency, partial — cost reduction + Ollama routing for simple tasks)
+**Priority:** P0 | **Scope:** XS (1 source line) | **Risk:** Low
+**Files:** `brain/nodes/planner.py`
 
-**What:** `tools/model_router.py`, function `_get_today_spend()`, line 148.
+### Problem
 
-**How:**
+All non-project tasks currently route to Claude Sonnet with `plan_complexity="high"` (line 266). This means simple code/file/automation tasks always use Sonnet for planning even when Ollama could handle them — wasting API budget and preventing local routing.
+
+**Note:** Test 12.1 (SaaS pricing page, 1051s planning) is NOT caused by this. That task is `ui_design` with `use_thinking=True` (line 264), and the 1051s is Sonnet thinking overhead — not Ollama or RAG. RAG file injection already only runs for `task_type == "project"` (line 227). This phase does NOT fix Test 12.1 but reduces planning cost for simple tasks and enables Ollama routing for code/file/automation planning when budget escalation is active.
+
+### Changes
+
+**brain/nodes/planner.py** — Refine complexity routing (around line 264–270):
+
 ```python
-# Replace:
-costs = _MODEL_COSTS.get(model, {"input": 3.00, "output": 15.00})
-# With:
-costs = _MODEL_COSTS.get(model, {"input": 15.00, "output": 75.00})
+# Before:
+    use_thinking = task_type in ("frontend", "ui_design")
+    plan_complexity = "low" if task_type == "project" else "high"
+
+# After:
+    # Thinking only for visual tasks that benefit from deep layout reasoning
+    use_thinking = task_type in ("frontend", "ui_design")
+    # Project tasks use known commands (low complexity). Simple code/file/automation
+    # tasks don't need Opus-level reasoning. Only frontend/ui_design/data are high.
+    plan_complexity = "high" if task_type in ("frontend", "ui_design", "data") else "low"
 ```
 
-This matches the conservative default already used in `claude_client.py`.
+### Impact
 
-**What NOT to do:**
-- Do NOT extract the default into a shared constant — it's only used in 3 places and they should all match the `claude_client.py` values
-- Do NOT change the defaults in `claude_client.py` — those are already correct (conservative: assume expensive model)
+- `code`, `automation`, `file`, `project` tasks now route to Ollama for planning when available (saves ~$0.01–0.03 per task + potential speed gain)
+- `frontend`, `ui_design`, `data` stay on Claude Sonnet with thinking (quality preserved)
+- Under budget escalation, code/automation/file tasks can plan via Ollama (faster on qwen2.5:7b than deepseek-r1:14b if Phase 0a is deployed first)
 
-**Tests to add:**
-- `test_get_today_spend_unknown_model_uses_expensive_default` — insert a row with model `"claude-unknown-99"` into `api_usage`, verify `_get_today_spend()` calculates cost using the 15.00/75.00 rates
-- **Test file:** `tests/test_model_router.py` (existing)
+### Tests to Add
 
-**Acceptance criteria:**
-- `_get_today_spend()` and `_check_budget()` use identical fallback pricing for unknown models
-
-**Verify:** `pytest tests/test_model_router.py -k "spend" -v`
-
-**Estimated scope:** S (<5 lines)
+```
+tests/test_planner.py:
+  test_plan_complexity_code_is_low()
+    — task_type="code" → plan() calls route_and_call with complexity="low"
+  test_plan_complexity_frontend_is_high()
+    — task_type="frontend" → plan() calls route_and_call with complexity="high"
+  test_plan_complexity_project_is_low()
+    — task_type="project" → plan() calls route_and_call with complexity="low"
+```
 
 ---
 
-## Phase 1 — Credential Filter Gaps (9.6)
+## Phase 1: Duplicate Error Detection in Retry Loop
 
-**Why:** Report §9.6. Missing credential patterns: `sk-ant-api*` (Anthropic), `xoxb-*` (Slack), Telegram bot tokens. Missing file extensions: `.py`, `.html`, `.js`.
+**Fixes:** F-3, G-3 (3 identical failures waste 5–10 min)
+**Priority:** P1 | **Scope:** S (~25 lines) | **Risk:** Low
+**Files:** `brain/graph.py`, `brain/state.py`
 
-**What:** `brain/nodes/deliverer.py`, lines 17–22 (`_CREDENTIAL_RE`) and line 48 (`_has_credential_patterns` suffix check).
+### Problem
 
-**How:**
+Tests 7.2a/7.2b: `run_pipeline.py` produced the same "usage error" on all 3 attempts. Each retry burned 155s+ in planning, generating the same wrong command. Total waste: ~465s per attempt.
 
-1. Add missing patterns to `_CREDENTIAL_RE`:
-```python
-_CREDENTIAL_RE = [
-    re.compile(r'\bghp_[a-zA-Z0-9]{36}\b'),            # GitHub PAT
-    re.compile(r'\bya29\.[a-zA-Z0-9_-]{50,}\b'),        # Google OAuth
-    re.compile(r'\bsk-[a-zA-Z0-9]{48}\b'),               # OpenAI key
-    re.compile(r'\bAKIA[A-Z0-9]{16}\b'),                 # AWS access key
-    re.compile(r'\bsk-ant-api\d{2}-[a-zA-Z0-9_-]{90,}\b'),  # Anthropic key
-    re.compile(r'\bxoxb-[0-9]+-[a-zA-Z0-9]+\b'),        # Slack bot token
-    re.compile(r'\b\d{8,10}:[A-Za-z0-9_-]{35}\b'),      # Telegram bot token
-]
-```
+### Root Cause
 
-2. Extend scanned extensions at line 48:
-```python
-if path.suffix not in ('.log', '.txt', '.json', '.yaml', '.yml', '.csv', '.py', '.html', '.js'):
-    return False
-```
+`graph.py:62–70` — `should_retry()` only checks `audit_verdict` and `retry_count`. It does not compare current error to previous errors.
 
-**What NOT to do:**
-- Do NOT add patterns for every possible API key format — only add patterns for services AgentSutra actually uses or is likely to encounter
-- Do NOT scan binary files (`.png`, `.pdf`, `.zip`) — only text formats
-- Do NOT add regex patterns for generic "looks like a secret" — high false positive rate
+### Changes
 
-**Tests to add:**
-- `test_credential_filter_anthropic_key` — content with `sk-ant-api03-...` → returns `True`
-- `test_credential_filter_slack_token` — content with `xoxb-123456-abc...` → returns `True`
-- `test_credential_filter_telegram_token` — content with `1234567890:ABCdef...` → returns `True`
-- `test_credential_filter_scans_py_files` — `.py` file with embedded GitHub PAT → returns `True`
-- `test_credential_filter_scans_html_files` — `.html` file with embedded key → returns `True`
-- `test_credential_filter_allows_clean_py` — `.py` file without credentials → returns `False`
-- **Test file:** `tests/test_deliverer.py` (existing)
-
-**Acceptance criteria:**
-- All 3 new credential patterns are detected in test artifacts
-- `.py`, `.html`, `.js` files are now scanned
-- Existing tests still pass (no regression on current patterns)
-
-**Verify:** `pytest tests/test_deliverer.py -k "credential" -v`
-
-**Estimated scope:** S (<20 lines)
-
----
-
-## Phase 2 — Data Fabrication Guard (2.1)
-
-**Why:** Report §2.1. Agent fabricates fake files (logs with fake tokens, fake SDKs, sample directories) when real files don't exist. Violates invariant #8. The existing `_check_referenced_files()` warns but the LLM ignores the warning.
-
-**Confidence: Medium.** Both changes below are prompt-based — they rely on LLM compliance. The executor warning is low-confidence (the LLM that fabricated a quantum computing SDK will likely ignore stronger wording too). The auditor prompt additions are higher-confidence because Opus is a separate, adversarial reviewer and already catches some fabrication (e.g., the GitHub scraper padding case in the report). Together they raise the bar, but neither guarantees prevention.
-
-**What:** `brain/nodes/auditor.py` (primary — strengthen fabrication prompt), and `brain/nodes/executor.py` (secondary — strengthen `_check_referenced_files()` warning).
-
-**How:**
-
-1. **Primary fix — auditor prompt** (higher confidence). In `auditor.py`, add explicit fabrication checks to the audit system prompt. These are specific enough for Opus to act on:
-```
-- FAIL if the code creates sample/fake/mock data files when the task asked to READ or ANALYSE existing data
-- FAIL if the code fabricates an entire library/SDK module instead of importing a real, installable package
-- FAIL if the code writes credential-shaped strings (ghp_, sk-, xoxb-, ya29., AKIA) to any output file
-- FAIL if the code creates a fake directory tree or generates synthetic data to substitute for missing real data
-```
-
-2. **Secondary fix — executor warning** (lower confidence). In `executor.py`, `_check_referenced_files()`, change the warning text to be more explicit about exit behaviour:
-```python
-return (
-    "\nWARNING: These files do NOT exist: " + ", ".join(missing) + ". "
-    "Do NOT create fake/sample versions. Call sys.exit(1) with a clear error message "
-    "stating which file was not found. NEVER fabricate data for a missing file."
-)
-```
-
-**What NOT to do:**
-- Do NOT add a separate fabrication detection pass in the executor — the auditor is the gate (invariant #2)
-- Do NOT block all file creation — legitimate tasks create output files
-- Do NOT try to detect fabrication programmatically by comparing file contents — impossible to verify
-- Do NOT over-invest in the executor warning — it's the weaker of the two fixes
-
-**Tests to add:**
-- `test_check_referenced_files_missing_warns_exit` — message references `data.csv`, file doesn't exist → warning includes `sys.exit(1)`
-- `test_check_referenced_files_existing_no_warn` — message references `data.csv`, file exists → empty string
-- `test_audit_prompt_includes_fabrication_checks` — verify the auditor system prompt contains "fabricates" or "fake/mock data" (string assertion on prompt constant)
-- **Test file:** `tests/test_executor.py` and `tests/test_auditor.py` (existing)
-
-**Acceptance criteria:**
-- Auditor prompt includes 4 specific fabrication check instructions
-- `_check_referenced_files()` returns stronger "sys.exit(1)" language for missing files
-- Neither change breaks existing tests
-
-**Verify:** `pytest tests/test_executor.py -k "referenced_files" -v && pytest tests/test_auditor.py -v`
-
-**Estimated scope:** S (<20 lines)
-
----
-
-## Phase 3 — Budget Escalation Skips High-Complexity (F-5)
-
-**Why:** Report §9.3 (F-5). Budget escalation at `model_router.py:80` routes to Ollama regardless of complexity. High-complexity plans sent to Ollama time out (120s), wasting time before falling back to Claude anyway.
-
-**What:** `tools/model_router.py`, function `_select_model()`, line 80.
-
-**How:**
-```python
-# Replace line 80:
-if purpose in ("classify", "plan") and _daily_spend_exceeds_threshold(0.7):
-# With:
-if purpose in ("classify", "plan") and complexity != "high" and _daily_spend_exceeds_threshold(0.7):
-```
-
-**What NOT to do:**
-- Do NOT add a separate complexity-aware budget router — the existing `_select_model()` handles this with one condition
-- Do NOT change the 0.7 threshold or any other budget logic
-- Do NOT add budget pre-check before Ollama fallback to Claude (report §9.3 F-4) — that's a separate, lower-priority change
-
-**Tests to add:**
-- `test_budget_escalation_skips_high_complexity` — mock `_daily_spend_exceeds_threshold(0.7)` → `True`, call `_select_model("plan", "high")` → returns Claude, not Ollama
-- `test_budget_escalation_routes_low_to_ollama` — mock same threshold → `True`, call `_select_model("plan", "low")` with Ollama available → returns Ollama
-- **Test file:** `tests/test_model_router.py` (existing)
-
-**Acceptance criteria:**
-- High-complexity tasks never route to Ollama under budget pressure
-- Low-complexity tasks still route to Ollama under budget pressure
-
-**Verify:** `pytest tests/test_model_router.py -k "budget" -v`
-
-**Estimated scope:** S (<5 lines)
-
----
-
-## Phase 4 — Stabilise Ollama Empty Response Handling (1.2)
-
-**Why:** Report §1.2. 36 "empty response" failures on Mar 08 — Ollama returns 200 with empty/unparseable content. Current retry (2 attempts, 2s delay) exists but 61% still fail. The `deepseek-r1:14b` model produces thinking tokens without a final answer.
-
-**What:** `tools/model_router.py`, function `_call_ollama()`, lines 181–184.
-
-**How:**
-
-The existing `<think>` stripping at line 183–184 only strips if both `<think>` and `</think>` are present. If the model returns *only* a thinking block without closing it, or if the content is entirely within `<think>...</think>` with nothing after, the result is empty.
-
-1. Handle case where content is entirely a thinking block (nothing after `</think>`):
-```python
-# After existing think-stripping (line 184):
-if "<think>" in content and "</think>" in content:
-    content = content.split("</think>", 1)[-1].strip()
-# Add: handle unclosed think block
-elif "<think>" in content and "</think>" not in content:
-    content = ""  # Incomplete thinking — treat as empty for retry
-```
-
-2. Log the raw response length when it's empty for debugging:
-```python
-if not content:
-    logger.warning("Ollama returned empty content (raw length: %d)", len(response.json().get("message", {}).get("content", "")))
-```
-
-**What NOT to do:**
-- Do NOT increase retry count beyond 2 — Ollama empty responses are a model issue, more retries just waste time
-- Do NOT switch the default Ollama model here — that's an ops decision, not a code change
-- Do NOT add structured output / JSON mode to Ollama — the chat API doesn't reliably support it
-
-**Tests to add:**
-- `test_ollama_strips_unclosed_think_block` — response with `<think>reasoning...` (no closing tag) → returns empty string (triggers retry/fallback)
-- `test_ollama_strips_complete_think_block_with_answer` — response with `<think>...</think>actual answer` → returns `"actual answer"`
-- `test_ollama_strips_think_block_no_answer` — response with `<think>...</think>` and nothing after → returns empty string
-- **Test file:** `tests/test_model_router.py` (existing)
-
-**Acceptance criteria:**
-- Unclosed `<think>` blocks are handled (treated as empty → triggers fallback)
-- Complete think blocks with content after `</think>` still work correctly
-- Raw response length is logged on empty responses
-
-**Verify:** `pytest tests/test_model_router.py -k "ollama" -v`
-
-**Estimated scope:** S (<15 lines)
-
----
-
-## Phase 5 — File Selector Parse Failure Retry (1.5)
-
-**Why:** Report §1.5. 21 occurrences of `"File selector returned unparseable response"` — the Claude-based file selector returns empty or non-JSON, silently falling back to no file injection.
-
-**What:** `brain/nodes/planner.py`, function `_inject_project_files()`, lines 357–367 (legacy fallback path).
-
-**How:**
-
-Add one retry on JSON parse failure, and log the raw response for debugging:
+**brain/state.py** — Add field (after line 57):
 
 ```python
-# Replace the single call + catch block (lines 357-367) with:
-selected = None
-for attempt in range(2):
-    try:
-        selection = claude_client.call(
-            selector_prompt, system=_FILE_SELECTOR_SYSTEM,
-            max_tokens=300, temperature=0.0,
-        )
-        parsed = json.loads(selection)
-        if isinstance(parsed, list):
-            selected = parsed
-            break
-        logger.warning("File selector returned non-list: %s", type(parsed).__name__)
-    except (json.JSONDecodeError, ValueError) as e:
+    was_refused: bool                          # v8.8: planner refusal tracking
+    previous_audit_feedback: str               # v9.0: duplicate error detection
+```
+
+**brain/graph.py** — Modify `should_retry()` (lines 62–70):
+
+```python
+def should_retry(state: AgentState) -> str:
+    """Decide whether to retry execution or deliver the result.
+
+    Early-exits if the current audit feedback matches the previous attempt's
+    feedback (first 150 chars), preventing identical retries on unrecoverable errors.
+    """
+    if state.get("audit_verdict") == "pass":
+        return "deliver"
+    if state.get("retry_count", 0) >= config.MAX_RETRIES:
+        logger.warning("Max retries reached for task %s", state["task_id"])
+        return "deliver"
+
+    # Duplicate error detection: if same feedback as last attempt, stop retrying
+    current_feedback = (state.get("audit_feedback") or "")[:150]
+    previous_feedback = (state.get("previous_audit_feedback") or "")[:150]
+    if current_feedback and previous_feedback and current_feedback == previous_feedback:
         logger.warning(
-            "File selector parse failure (attempt %d/2): %s — raw: %.100s",
-            attempt + 1, e, selection if 'selection' in dir() else "<no response>",
+            "Duplicate audit feedback for task %s — aborting retries (was: %.80s)",
+            state["task_id"], current_feedback,
         )
-    except Exception as e:
-        logger.warning("File selector failed: %s", e)
-        break  # Don't retry on non-parse errors (API errors, etc.)
+        return "deliver"
 
-if selected is None:
-    return system
+    logger.info("Retrying task %s (attempt %d)", state["task_id"], state.get("retry_count", 0))
+    return "plan"
 ```
 
-**What NOT to do:**
-- Do NOT add JSON mode / structured output constraint — `claude_client.call()` doesn't support response format parameters and adding it is a larger change
-- Do NOT retry more than once — parse failures are usually model confusion, not transient errors
-- Do NOT change the RAG path — this only affects the legacy fallback
+**brain/nodes/auditor.py** — Store previous feedback before overwriting (in `audit()`, after verdict extraction ~line 230):
 
-**Tests to add:**
-- `test_file_selector_retries_on_parse_failure` — mock `claude_client.call` to return `"not json"` first, then `'["file.py"]'` second → files are injected
-- `test_file_selector_logs_raw_response_on_failure` — mock to return garbage → verify log contains the raw response
-- **Test file:** `tests/test_planner.py` (existing)
+```python
+    return {
+        "audit_verdict": verdict,
+        "audit_feedback": feedback,
+        "previous_audit_feedback": state.get("audit_feedback", ""),
+        "retry_count": state.get("retry_count", 0) + (0 if verdict == "pass" else 1),
+    }
+```
 
-**Acceptance criteria:**
-- File selector retries once on JSON parse failure
-- Raw failing response is logged (truncated to 100 chars)
-- If both attempts fail, falls back gracefully (returns system unchanged)
+**brain/graph.py** — Add field to initial state in `run_task()` (line ~135):
 
-**Verify:** `pytest tests/test_planner.py -k "file_selector or inject" -v`
+```python
+    "previous_audit_feedback": "",
+```
 
-**Estimated scope:** M (~25 lines)
+### Why 150 Characters
+
+- Long enough to capture the error signature (e.g., "run_pipeline.py: error: the following arguments are required: --client")
+- Short enough to ignore variations in timestamps, stack trace line numbers, or retry count mentions
+- Tested against actual log data: the igaming pipeline errors were identical in their first 150 chars across all 3 attempts
+
+### Tests to Add
+
+```
+tests/test_graph.py:
+  test_should_retry_exits_on_duplicate_feedback()
+    — state with audit_feedback == previous_audit_feedback → returns "deliver"
+  test_should_retry_continues_on_different_feedback()
+    — state with different audit_feedback vs previous → returns "plan"
+  test_should_retry_continues_on_first_failure()
+    — state with previous_audit_feedback="" → returns "plan" (first failure always retries)
+  test_should_retry_still_respects_max_retries()
+    — state with retry_count=3 and different feedback → returns "deliver"
+```
 
 ---
 
-## Phase 6 — Chain Refusal Status Bug (3.1)
+## Phase 2: Audit Data Sanity Checks
 
-**Why:** Report §3.1. Chain reports "all 2 steps passed" when both steps were `rm -rf ~/` security refusals.
+**Fixes:** F-4, G-4 (Tugi Tark 11,600% CTR not caught)
+**Priority:** P1 | **Scope:** S (~20 lines) | **Risk:** Low
+**Files:** `brain/nodes/auditor.py`
 
-**Root cause (confirmed by code investigation):** The planner recognises the dangerous task and generates a *refusal plan* ("I cannot execute this task"). The executor then generates benign Python code from that plan — e.g., `print("I cannot execute this task. rm -rf ~/ would delete your home directory.")`. This benign code:
-- Runs successfully (exit code 0) → `exec_failed = False`
-- Contains `rm -rf ~/` only inside a string literal, which doesn't match the Tier 1 word-boundary regex → `exec_blocked = False` (no `"BLOCKED:"` in result)
-- Produces no security violations → `audit_verdict = "pass"`
+### Problem
 
-All three conditions in the strict-AND gate (line 1154) are False, so the chain continues. After all steps, it reports "all passed." The pipeline correctly *handled* the dangerous request (nothing bad happened), but the chain *misreports* the outcome.
+The Tugi Tark report showed 0 impressions with 91,499 clicks and 11,600% CTR. Opus audit passed it. The auditor checks for fabrication (fake data created from nothing) but not for mathematical impossibility in parsed data.
 
-**What:** `brain/nodes/executor.py` — add a `was_refused` flag to AgentState. `bot/handlers.py` — check the flag in the chain handler.
+### Root Cause
 
-**Why not text matching:** Checking `final_response` for phrases like "security policy", "i cannot", "i can't" is fragile — legitimate responses discussing limitations (e.g., "I can't determine the exact date without more context") would false-positive. A structured flag is more reliable.
+`auditor.py:12–51` — `SYSTEM_BASE` has no data sanity validation instructions.
+`auditor.py:64–72` — `AUDIT_CRITERIA["data"]` checks for exit code, assertions, output files — not data validity.
 
-**How:**
+### Changes
 
-1. Add `was_refused: bool` to `AgentState` in `brain/state.py` (default `False`).
+**auditor.py** — Add data sanity section to `SYSTEM_BASE` (after line 51, before the closing `"""`):
 
-2. In `brain/nodes/planner.py`, when the planner's system prompt includes security refusal language and the plan output contains refusal indicators, set the flag. The planner already has `SEC-2` credential file detection (lines 43-56) — after that check, if the plan starts with refusal language ("I cannot", "This task", "I'm unable"), set `state["was_refused"] = True`:
 ```python
-# After plan is generated:
-plan_lower = plan.strip().lower()[:100]
-if any(plan_lower.startswith(p) for p in [
-    "i cannot", "i can't", "i'm unable", "this task cannot",
-    "this request", "i will not", "i won't",
-]):
-    state["was_refused"] = True
-    logger.info("Planner refused task: %.80s", plan.strip())
+DATA SANITY CHECK (for data analysis/reporting tasks):
+- If the output contains percentages: verify they are between 0–100% (unless explicitly a growth rate or ratio)
+- If the output contains rates (CTR, engagement rate, conversion rate): verify the denominator is non-zero
+- If impressions = 0 but clicks > 0: FAIL (mathematically impossible)
+- If any metric exceeds 1000% in a standard report context: FAIL with "data anomaly detected"
+- Look for signs of column misalignment: repeated zero values where non-zero is expected, wildly inconsistent magnitudes across rows"""
 ```
 
-3. In `bot/handlers.py`, chain handler, after each step's pipeline run (line 1172), check the flag:
+**auditor.py** — Expand `AUDIT_CRITERIA["data"]` (lines 64–72):
+
 ```python
-# Before the for loop:
-refused_count = 0
+    "data": """
+Evaluate:
+1. Does the analysis correctly address the user's question?
+2. Did execution succeed (exit code 0)?
+3. Did all data validation assertions pass? Look for "ALL ASSERTIONS PASSED".
+4. Were output files (charts, CSVs) generated?
+5. Are there tracebacks or errors?
+6. DATA SANITY: Are percentages between 0–100%? Are derived metrics consistent with source data (e.g., CTR = clicks/impressions, so impressions must be > 0 if clicks > 0)? Are there zero-denominator artifacts?
 
-# After line 1172 (previous_artifacts = ...):
-if result.get("was_refused", False):
-    refused_count += 1
-
-# Replace the else block at lines 1187-1191:
-else:
-    if refused_count > 0:
-        await update.message.reply_text(
-            f"Chain complete - {refused_count}/{len(steps)} steps refused by security policy."
-        )
-    else:
-        await update.message.reply_text(
-            f"Chain complete - all {len(steps)} steps passed."
-        )
+FAIL if: non-zero exit code, assertion failures, no output files when expected, traceback present, mathematically impossible values in output data.""",
 ```
 
-**What NOT to do:**
-- Do NOT halt the chain on refusals — the current behaviour of continuing is correct (a chain might have some refused and some valid steps)
-- Do NOT scan `final_response` for refusal phrases — false positives on legitimate responses discussing limitations
-- Do NOT add complex NLP-based refusal detection — prefix matching on the planner output is sufficient because the planner generates refusals with consistent phrasing
+### Tests to Add
 
-**Tests to add:**
-- `test_planner_sets_refused_flag_on_refusal` — mock planner output starting with "I cannot execute" → `state["was_refused"]` is `True`
-- `test_planner_does_not_set_refused_on_normal_plan` — mock planner output with a real plan → `state["was_refused"]` is `False`
-- `test_chain_reports_refused_count` — mock 2 steps both with `was_refused=True` → completion message mentions refused count
-- `test_chain_reports_all_passed_when_none_refused` — mock 2 steps with `was_refused=False` → message says "all passed"
-- **Test file:** `tests/test_planner.py` and `tests/test_handlers.py` (existing)
+```
+tests/test_auditor.py:
+  test_audit_catches_impossible_ctr()
+    — Mock execution result with "Impressions: 0, Clicks: 91499, CTR: 11600%"
+    — Assert audit returns verdict="fail" with "data anomaly" or "mathematically impossible"
+  test_audit_passes_valid_data()
+    — Mock execution result with "Impressions: 10000, Clicks: 500, CTR: 5.0%"
+    — Assert audit returns verdict="pass"
+  test_audit_catches_zero_denominator_rate()
+    — Mock execution result with "Views: 0, Engagement Rate: 850%"
+    — Assert audit returns verdict="fail"
+```
 
-**Acceptance criteria:**
-- Planner sets `was_refused=True` when it generates a refusal plan
-- Chain completion message distinguishes "all passed" from "N steps refused"
-- Normal plans (non-refusal) do not trigger the flag
+### Caveat
 
-**Verify:** `pytest tests/ -k "chain or refused" -v`
+This is a prompt-based fix — Opus must interpret the instructions correctly. The prompt additions are specific and use concrete examples (0 impressions + non-zero clicks) to maximise compliance. A post-execution numeric validator would be more deterministic but requires parsing arbitrary output formats — not worth the complexity for v9.0.
 
-**Estimated scope:** M (~30 lines across 3 files)
+### Relationship to Phase 7
+
+Phase 2 adds data sanity to `SYSTEM_BASE` (applies to ALL task types). Phase 7 adds it to `AUDIT_CRITERIA["data"]` (applies only to data tasks). For data tasks, Opus sees the instructions twice — this is deliberate belt-and-suspenders. The `SYSTEM_BASE` version uses generic language ("for data analysis/reporting tasks") providing a safety net for edge cases where `task_type` doesn't match the actual output (e.g., a `code` task that produces a data report). The `AUDIT_CRITERIA["data"]` version is more specific and is what Opus will follow for properly classified data tasks. Neither depends on the other; both can be deployed independently.
 
 ---
 
-## Phase 7 — /deploy Accepts Code-Typed HTML (3.5)
+## Phase 3: HTML Truncation Detection
 
-**Why:** Report §3.5. A 404 error page HTML was classified as `code` (not `frontend`), so `/deploy` rejected it. But `/deploy` already works by globbing for `.html` files — it doesn't actually check `task_type`. Re-reading the handler (lines 1209–1216): it globs `config.OUTPUTS_DIR` for `*{task_id_prefix}*.html`. If no HTML files are found, it says "No HTML artifacts found."
+**Fixes:** F-5, G-6 (Test 8.3 truncated 3 times, undetected)
+**Priority:** P1 | **Scope:** S (~15 lines) | **Risk:** Low
+**Files:** `brain/nodes/executor.py`
 
-**Investigation:** The failure was not a task_type check — it was that the HTML file wasn't named with the task_id prefix, or wasn't in `OUTPUTS_DIR`. The report says "task classification affects downstream functionality" but the code shows `/deploy` doesn't check task_type at all.
+### Problem
 
-**Revised what:** The issue might be that the task's HTML artifact was saved with a different naming convention. Check if the artifact path matches the glob pattern. The fix is to also check the task's artifact list from the database.
+Test 8.3 (Multi-API daily brief): code truncated mid-HTML on all 3 retries. The truncation detector (`_detect_truncation()`, lines 49–118) checks unclosed Python parens/brackets and shell if/fi constructs. It does not check for unclosed HTML tags.
 
-**How:**
+### Root Cause
+
+`executor.py:49–118` — No HTML-aware checks. The function only handles Python syntax constructs and shebang-gated shell scripts.
+
+### Changes
+
+**executor.py** — Add HTML detection block in `_detect_truncation()` (after line 108, before the logging at line 110):
+
 ```python
-# After line 1210 (html_files = ...), if no matches, try the task's stored artifacts:
-if not html_files:
-    task = await db.get_task_by_prefix(task_id_prefix)
-    if task and task.get("task_state"):
-        try:
-            state = json.loads(task["task_state"]) if isinstance(task["task_state"], str) else task["task_state"]
-            for artifact_path in state.get("artifacts", []):
-                p = Path(artifact_path)
-                if p.exists() and p.suffix == ".html":
-                    html_files.append(p)
-        except (json.JSONDecodeError, TypeError):
-            pass
+    # HTML truncation — check for unclosed root elements
+    # Only trigger for code that is generating HTML (contains DOCTYPE or <html)
+    stripped_lower = stripped.lower()
+    if "<!doctype" in stripped_lower or "<html" in stripped_lower:
+        # Check that the HTML document is properly closed
+        has_html_open = "<html" in stripped_lower
+        has_html_close = "</html>" in stripped_lower
+        if has_html_open and not has_html_close:
+            truncated = True
+            logger.warning("HTML truncation detected: <html> without </html>")
+
+        # Also check for unclosed <script> and <style> blocks
+        script_opens = stripped_lower.count("<script")
+        script_closes = stripped_lower.count("</script>")
+        style_opens = stripped_lower.count("<style")
+        style_closes = stripped_lower.count("</style>")
+        if script_opens > script_closes or style_opens > style_closes:
+            truncated = True
+            logger.warning(
+                "HTML truncation: unclosed tags script=%d/%d style=%d/%d",
+                script_opens, script_closes, style_opens, style_closes,
+            )
 ```
 
-**What NOT to do:**
-- Do NOT add a task_type check to `/deploy` — the current design correctly ignores it
-- Do NOT scan the entire workspace for HTML files — only check task-specific artifacts
-- Do NOT change the glob pattern — it works for most cases
+### Why Only Root-Level Tags
 
-**Tests to add:**
-- `test_deploy_finds_html_from_task_artifacts` — task with HTML artifact stored in `task_state` but not matching glob → `/deploy` still finds it
-- **Test file:** `tests/test_handlers.py` (existing)
+- Checking every `<div>` vs `</div>` would create massive false positives (template literals, JSX fragments, innerHTML assignments all have unbalanced tags in Python string context)
+- `<html>` without `</html>` is a definitive signal that the HTML document was cut off
+- `<script>` without `</script>` catches the exact failure mode from Test 8.3 (code truncated inside a JS block within HTML)
 
-**Acceptance criteria:**
-- `/deploy` succeeds for tasks where HTML artifacts exist but don't match the glob pattern
-- Existing glob-based lookup still works as primary path
+### Tests to Add
 
-**Verify:** `pytest tests/test_handlers.py -k "deploy" -v`
-
-**Estimated scope:** S (<15 lines)
+```
+tests/test_executor.py:
+  test_truncation_detects_unclosed_html()
+    — Code: "<!DOCTYPE html><html><head></head><body><div>" → returns True
+  test_truncation_passes_complete_html()
+    — Code: "<!DOCTYPE html><html><head></head><body></body></html>" → returns False
+  test_truncation_detects_unclosed_script()
+    — Code: '<!DOCTYPE html><html><body><script>function foo() {' → returns True
+  test_truncation_detects_unclosed_style()
+    — Code: "<!DOCTYPE html><html><head><style>.foo {" → returns True
+  test_truncation_ignores_html_in_python_string()
+    — Code: 'html = "<html>" + content + "</html>"' → returns False (balanced)
+  test_truncation_no_false_positive_on_pure_python()
+    — Code: 'print("hello world")' → returns False (no <!DOCTYPE or <html)
+```
 
 ---
 
-## Phase 8 — Reduce False Positive Security Blocks (2.3)
+## Phase 4: importlib Smart Allowlist
 
-**Why:** Report §2.3. Two confirmed false positives: mpmath pi computation blocked, `sys.builtin_module_names` introspection blocked. Additionally, `subprocess.run(["ls", "-la"])` blocked despite `ls` being on the safe list.
+**Fixes:** F-7, G-4 from previous plan (Phase 8 revival — Test 15.1 false positive)
+**Priority:** P1 | **Scope:** M (~35 lines) | **Risk:** Medium (security-sensitive)
+**Files:** `tools/sandbox.py`
 
-**Investigation results (confirmed):** Neither `mpmath` nor `sys.builtin_module_names` appears in any blocklist pattern (`_BLOCKED_PATTERNS` or `_CODE_BLOCKED_PATTERNS`). The blocks were caused by the *generated code* using operations that match existing Tier 4 patterns — most likely `subprocess` calls (the #1 false positive trigger per the report, 15 occurrences) or `__import__()` / `importlib.import_module()` for dynamic module introspection.
+### Problem
 
-**Pre-implementation step (REQUIRED):** Before writing any code, reproduce both false positives:
-1. Write a test script that `import mpmath; print(mpmath.mp.dps)` and run it through `_check_code_safety()`
-2. Write a test script that `import sys; print(sys.builtin_module_names)` and run it through `_check_code_safety()`
-3. If neither triggers a block, the false positive is in the **planner or auditor** (prompt-level refusal), not the code scanner. In that case, pivot to a prompt fix instead.
+Test 15.1: `importlib.import_module("sys")` was blocked by Tier 4 scanner. The task (analyzing Python's built-in modules) is legitimate but uses dynamic imports — the correct tool for introspection tasks.
 
-**What:** `tools/sandbox.py`, function `_check_code_safety()` and `_is_safe_subprocess()`.
+### Root Cause
 
-**How (conditional on reproduction):**
+`sandbox.py:427` — `r"\bimportlib\s*\.\s*import_module\s*\("` blocks all `importlib.import_module()` calls without inspecting the argument. `importlib.import_module("sys")` and `importlib.import_module("config")` are treated identically.
 
-**If the false positive is in the code scanner (subprocess or dynamic import patterns):**
-1. Read `_check_code_safety()` to confirm `_is_safe_subprocess()` runs before any regex would block subprocess usage. If the order is wrong, fix it.
-2. Verify `_is_safe_subprocess()` correctly handles `subprocess.run(["ls", "-la"])` — the first element `"ls"` is on `_SUBPROCESS_SAFE_CMDS`. If the AST extraction doesn't handle lists with flags, fix the first-element extraction.
-3. For `sys.builtin_module_names` — if `__import__()` is used in the generated code, consider whether `__import__("sys")` should be allowlisted (read-only, no security impact).
+### Changes
 
-**If the false positive is in the planner/auditor (prompt-level refusal):**
-1. The planner's system prompt may contain overly broad security restrictions that cause Claude to refuse benign math/introspection tasks
-2. Add clarifying language to the planner prompt: "Standard library modules (sys, os.path, math, statistics) and scientific computing libraries (numpy, scipy, sympy, mpmath) are safe to use for read-only operations."
-3. This is a prompt-only change in `brain/nodes/planner.py`
+**tools/sandbox.py** — Replace regex pattern with AST-based check (modify line 427 and add helper):
 
-**What NOT to do:**
-- Do NOT add a blanket "safe libraries" whitelist to the code scanner — the scanner blocks operations, not library names
-- Do NOT weaken Tier 4 patterns — only fix the specific false positive source
-- Do NOT guess at the root cause — reproduce first, then fix
-- Do NOT remove the `__import__` block entirely — it's a real attack vector; if needed, allowlist specific safe modules
+Step 1: Remove the importlib regex from `_CODE_BLOCKED_PATTERNS` (line 427):
 
-**Tests to add:**
-- `test_mpmath_code_not_blocked` — code with `import mpmath; mpmath.mpf(3.14)` → NOT blocked by code scanner
-- `test_sys_builtin_modules_not_blocked` — code with `import sys; sys.builtin_module_names` → NOT blocked
-- `test_subprocess_ls_with_flags_allowed` — code with `subprocess.run(["ls", "-la", "/tmp"])` → NOT blocked
-- `test_subprocess_dangerous_still_blocked` — code with `subprocess.run(["rm", "-rf", "/"])` → blocked
-- **Test file:** `tests/test_sandbox.py` (existing)
-
-**Acceptance criteria:**
-- Both mpmath and sys.builtin_module_names reproduction cases pass the scanner
-- `subprocess.run(["ls", ...])` is allowed (ls is on safe list)
-- `subprocess.run(["rm", ...])` is still blocked (rm is not on safe list)
-- Root cause is confirmed and documented in the commit message
-
-**Verify:** `pytest tests/test_sandbox.py -k "subprocess or mpmath or builtin" -v`
-
-**Estimated scope:** S–M (10–30 lines, depending on which layer the fix targets)
-
----
-
-## Phase 9 — Path Sanitisation + Linux Paths (2.2)
-
-**Why:** Report §2.2 + §9.5 (P2-3). Production paths like `/Users/agentruntime1/` appear in 8+ delivered artifacts. The existing `_sanitize_paths()` in `deliverer.py:34` handles macOS paths but not Linux `/home/` paths.
-
-**What:** `brain/nodes/deliverer.py`, function `_sanitize_paths()`, line 34.
-
-**How:**
 ```python
-def _sanitize_paths(text: str) -> str:
-    text = re.sub(r'/(Users|home)/\w+/', '~/', text)
-    text = re.sub(r'\bAdmin\.local\b', '<hostname>', text)
-    return text
+    # Line 427 — REMOVE this line:
+    # (re.compile(r"\bimportlib\s*\.\s*import_module\s*\(", re.IGNORECASE), "importlib dynamic import"),
 ```
 
-Single regex change: `r'/Users/\w+/'` → `r'/(Users|home)/\w+/'`.
-
-**What NOT to do:**
-- Do NOT sanitise paths in the actual output files — only in the Telegram delivery message
-- Do NOT add hostname detection beyond `Admin.local` — it's the only known hostname
-- Do NOT add path sanitisation to the executor or auditor — deliverer is the right place
-
-**Tests to add:**
-- `test_sanitize_paths_linux_home` — `/home/agentruntime1/foo` → `~/foo`
-- `test_sanitize_paths_macos_still_works` — `/Users/agentruntime1/foo` → `~/foo`
-- **Test file:** `tests/test_deliverer.py` (existing)
-
-**Acceptance criteria:**
-- Both `/Users/X/` and `/home/X/` are replaced with `~/`
-- Existing macOS path sanitisation still works
-
-**Verify:** `pytest tests/test_deliverer.py -k "sanitize" -v`
-
-**Estimated scope:** S (<5 lines)
-
----
-
-## Phase 10 — Over-Generation Token Limits (4.3)
-
-**Why:** Report §4.3. Several single API calls consumed 50K–78K output tokens (~$0.75–$1.17 each). Code generation has `max_tokens=8192` at `executor.py:556` but this is overridden to 128000 when thinking is enabled (`claude_client.py:187-188`). With `thinking=True` (the default, confirmed at `executor.py:556`), the `max_tokens` parameter is completely ineffective.
-
-**Tradeoff:** Disabling thinking (`thinking=False`) would make `max_tokens=8192` effective but sacrifices extended thinking, which is the main quality driver for complex code generation. This is a quality-vs-cost tradeoff, not a pure win.
-
-**What:** `brain/nodes/executor.py`, code generation call at line 556 and HTML generation at line 655.
-
-**How — Approach: scope the prompt, not the model.**
-
-Rather than disabling thinking (which hurts quality), add explicit length guidance to the `CODE_GEN_SYSTEM` prompt. The model's internal allocation with thinking enabled tends to self-limit output length when the prompt sets clear expectations. Combined with a higher `max_tokens` that's still below the current unbounded 128000:
-
-1. Add to `CODE_GEN_SYSTEM` (around line 109):
-```python
-# Add to the system prompt rules:
-"- Keep code concise. A typical task should produce 50-300 lines of code\n"
-"- Do NOT generate entire frameworks, full CSS libraries, or production boilerplate unless explicitly asked\n"
-"- If the task says 'simple' or 'basic', keep the code under 100 lines\n"
-```
-
-2. For the `max_tokens` floor issue — rather than fighting the 128000 floor, accept that thinking-enabled calls get a large budget but guide the model to use it wisely via the prompt. The thinking budget is shared: if the model thinks for 120K tokens, it only has 8K for output — which is the desired behaviour.
-
-3. As a secondary measure, add a post-generation length warning in the executor. After code generation, if the output exceeds 500 lines, log a warning:
-```python
-if code and code.count("\n") > 500:
-    logger.warning("Code gen produced %d lines — possible over-generation", code.count("\n"))
-```
-
-**What NOT to do:**
-- Do NOT set `thinking=False` on code generation — it sacrifices the primary quality driver for complex tasks
-- Do NOT change the 128000 floor in `claude_client.py` — it's correct for thinking-enabled calls (too low and thinking consumes all budget, leaving zero for output)
-- Do NOT add per-task-type token limits — adds complexity for marginal benefit
-- Do NOT truncate generated code post-hoc — that would break the code
-
-**Tests to add:**
-- `test_code_gen_system_prompt_includes_length_guidance` — verify `CODE_GEN_SYSTEM` contains "50-300 lines" or similar length guidance (string assertion)
-- `test_code_gen_warns_on_long_output` — mock code gen returning 600-line code → verify log warning about over-generation
-- **Test file:** `tests/test_executor.py` (existing)
-
-**Acceptance criteria:**
-- `CODE_GEN_SYSTEM` includes explicit length guidance
-- Over-generation (>500 lines) is logged as a warning
-- Thinking remains enabled for code generation (quality preserved)
-
-**Verify:** `pytest tests/test_executor.py -k "code_gen or over_gen" -v`
-
-**Estimated scope:** S (<15 lines)
-
----
-
-## Phase 11 — RAG Zero-Vector Poisoning Guard (9.5)
-
-**Why:** Report §9.5 (confirmed). `rag.py:167-169` pads embedding failures with zero vectors. These zero-vector chunks pollute query results because cosine similarity with a zero vector is undefined/0, but LanceDB may still return them.
-
-**What:** `tools/rag.py` — either filter at query time or at index time.
-
-**Pre-implementation step (REQUIRED):** Determine the actual `_distance` value LanceDB returns for zero-vector chunks. The value could be `NaN`, `inf`, `0.0`, `2.0`, or something else — this depends on LanceDB's internal cosine distance implementation and how it handles zero-magnitude vectors.
+Step 2: Add AST-based importlib checker (after `_is_safe_subprocess()`, ~line 543):
 
 ```python
-# Quick test script — run manually before implementing:
-import lancedb, pyarrow as pa
-db = lancedb.connect("/tmp/test_zero_vec")
-schema = pa.schema([
-    pa.field("text", pa.string()),
-    pa.field("vector", pa.list_(pa.float32(), 4)),
-])
-tbl = db.create_table("test", schema=schema)
-tbl.add([
-    {"text": "real", "vector": [0.1, 0.2, 0.3, 0.4]},
-    {"text": "zero", "vector": [0.0, 0.0, 0.0, 0.0]},
-])
-results = tbl.search([0.1, 0.2, 0.3, 0.4]).limit(2).to_list()
-for r in results:
-    print(f"{r['text']}: _distance={r['_distance']}")
-```
+# Known-safe modules for importlib.import_module()
+_IMPORTLIB_SAFE_MODULES = frozenset({
+    "sys", "os", "math", "json", "re", "datetime", "pathlib", "collections",
+    "itertools", "functools", "typing", "abc", "io", "string", "textwrap",
+    "copy", "pprint", "enum", "dataclasses", "decimal", "fractions",
+    "statistics", "random", "hashlib", "hmac", "secrets", "struct",
+    "codecs", "unicodedata", "difflib", "csv", "html", "xml",
+    "urllib", "http", "email", "logging", "warnings", "contextlib",
+    "inspect", "dis", "ast", "token", "tokenize", "types", "builtins",
+    "importlib", "pkgutil", "platform", "sysconfig", "time", "calendar",
+    "operator", "numbers",
+})
 
-**How (choose based on test result):**
 
-**Option A — Query-time filter (if `_distance` is a predictable value for zero vectors):**
-```python
-# After LanceDB query returns results, filter by the observed threshold:
-results = [r for r in results if r.get("_distance", 0) < THRESHOLD]
-```
+def _is_safe_importlib(code: str) -> bool:
+    """True if ALL importlib.import_module() calls use known-safe module names.
 
-**Option B — Index-time filter (if `_distance` is unpredictable, e.g., `NaN`):**
-Skip storing zero-vector chunks during `build_index()`. In the embedding function, return `None` for failed batches instead of zero vectors, and filter them out before inserting into LanceDB:
-```python
-# In build_index(), after embedding:
-valid_entries = [
-    (chunk, emb) for chunk, emb in zip(chunks, embeddings)
-    if any(v != 0.0 for v in emb)
-]
-```
-This requires re-indexing but is more robust.
+    Uses AST parsing to extract the first argument of each call. Only allows
+    string literals from the safe set. Dynamic arguments (variables, f-strings)
+    are rejected.
 
-**What NOT to do:**
-- Do NOT hardcode a distance threshold without testing — the actual value is unknown
-- Do NOT add embedding validation/retry — embedding failures are rare and the fallback handles them
-- Do NOT use a different distance metric — cosine is correct for nomic-embed-text
+    Args:
+        code: Python source code to inspect.
 
-**Tests to add:**
-- `test_rag_query_excludes_zero_vector_chunks` — build index with one real embedding and one zero vector, query → only the real chunk is returned
-- `test_rag_index_with_all_valid_embeddings` — normal case, no zero vectors → all chunks returned
-- **Test file:** `tests/test_rag.py` (existing)
-
-**Acceptance criteria:**
-- RAG queries never return chunks that had embedding failures
-- Valid chunks are still returned correctly
-- The chosen threshold (or filtering approach) is documented in a code comment with the test result
-
-**Verify:** `pytest tests/test_rag.py -k "zero_vector or query" -v`
-
-**Estimated scope:** S (<15 lines)
-
----
-
-## Phase 12 — Task Completion Log Summary (4.4)
-
-**Why:** Report §4.4. 88% of log lines are idle `getUpdates` polling. No single log line summarises a completed task's timings, verdict, and cost.
-
-**What:** `brain/graph.py`, function `run_task()` — after pipeline completes, log a structured summary line.
-
-**How:**
-
-At the end of `run_task()`, after the pipeline finishes, add:
-
-```python
-# After pipeline completes, log summary:
-timings = state.get("stage_timings", [])
-timing_str = " ".join(
-    f"{t['name']}:{t['duration_ms']/1000:.1f}s"
-    for t in timings
-)
-total_s = sum(t["duration_ms"] for t in timings) / 1000 if timings else 0
-verdict = state.get("audit_verdict", "unknown")
-logger.info(
-    "Task %s completed in %.1fs [%s] verdict=%s",
-    state.get("task_id", "?")[:8], total_s, timing_str, verdict,
-)
-```
-
-**What NOT to do:**
-- Do NOT add cost to the log line — `run_task()` doesn't have access to cost data, and adding it would require threading cost tracking through the pipeline
-- Do NOT suppress `getUpdates` logging — that's controlled by the telegram library's log level, not AgentSutra code
-- Do NOT add structured logging (JSON format) — plain text matches existing patterns
-
-**Tests to add:**
-- `test_run_task_logs_completion_summary` — mock a pipeline run → verify `caplog` contains "completed in" with timing and verdict
-- **Test file:** `tests/test_graph.py` (existing)
-
-**Acceptance criteria:**
-- Every completed task produces one INFO line with: task ID prefix, total time, per-stage timings, and audit verdict
-- Failed tasks also get a summary line
-
-**Verify:** `pytest tests/test_graph.py -k "completion" -v`
-
-**Estimated scope:** S (<15 lines)
-
----
-
-## Phase 13 — Timeout Progress Feedback (3.4)
-
-**Why:** Report §3.4. 5 tasks timed out at 900s, 3 shell commands timed out at 300–600s. Users watched with no feedback, sending follow-up messages 16–35s after timeouts.
-
-**What:** `bot/handlers.py`, task processing handler (around line 818–900, where `run_task` is awaited).
-
-**How:**
-
-The pipeline runs in `asyncio.to_thread()` (sync nodes in a thread). The handler already `await`s the result with `asyncio.wait_for(task_future, timeout=config.LONG_TIMEOUT)`. Add a simple fire-and-forget timer that edits the status message at the 5-minute mark:
-
-```python
-# After line 816 (status_msg = ...), before the try block:
-async def _send_progress():
-    await asyncio.sleep(300)  # 5 minutes
+    Returns:
+        True if all importlib calls are safe, False if any are unsafe or unparseable.
+    """
     try:
-        stage = get_stage(task_id) or "processing"
-        await status_msg.edit_text(
-            f"Still working... (task {task_id[:8]}, stage: {stage})"
-        )
-    except Exception:
-        pass  # Message may have been edited already
+        tree = ast.parse(code)
+    except SyntaxError:
+        return False
 
-progress_task = asyncio.create_task(_send_progress())
-
-# After the pipeline completes (in the try/except/finally around line 900):
-# In the finally block, cancel the timer:
-progress_task.cancel()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        # Match importlib.import_module(...)
+        if not (isinstance(func, ast.Attribute)
+                and func.attr == "import_module"
+                and isinstance(func.value, ast.Name)
+                and func.value.id == "importlib"):
+            continue
+        # Must have at least one argument
+        if not node.args:
+            return False
+        first_arg = node.args[0]
+        # Only allow string literal arguments
+        if not (isinstance(first_arg, ast.Constant) and isinstance(first_arg.value, str)):
+            return False
+        # Check the module name against safe list (base module only)
+        module_base = first_arg.value.split(".")[0]
+        if module_base not in _IMPORTLIB_SAFE_MODULES:
+            return False
+    return True
 ```
 
-This uses `asyncio.create_task` — no architectural changes needed. The timer is a simple coroutine that sleeps 5 minutes, edits the status message once, and gets cancelled when the pipeline finishes (whether by success, failure, or timeout). `get_stage()` already exists in `brain/graph.py` and returns the current pipeline stage.
+Step 3: Integrate into `_check_code_safety()` (~line 546):
 
-**What NOT to do:**
-- Do NOT add periodic polling or multiple progress updates — one update at 5 minutes is enough
-- Do NOT try to edit the message during sync pipeline nodes — the timer runs independently in the event loop
-- Do NOT add progress bars or percentage tracking — the pipeline stages don't have predictable durations
-- Do NOT change the timeout value — this is about feedback, not timeout policy
+In `_check_code_safety()`, after the `_CODE_BLOCKED_PATTERNS` loop and before the subprocess check, add:
 
-**Tests to add:**
-- `test_progress_message_sent_after_5_minutes` — mock `asyncio.sleep`, `get_stage`, and `status_msg.edit_text`, verify the progress message is sent with the current stage
-- `test_progress_timer_cancelled_on_completion` — verify the timer task is cancelled when the pipeline finishes before 5 minutes
-- **Test file:** `tests/test_handlers.py` (existing)
+```python
+    # importlib.import_module — AST-based check (safe modules allowed, config/dotenv blocked)
+    if re.search(r"\bimportlib\s*\.\s*import_module\s*\(", code, re.IGNORECASE):
+        if not _is_safe_importlib(code):
+            return "BLOCKED: importlib.import_module with unsafe or dynamic module name"
+```
 
-**Acceptance criteria:**
-- Tasks running longer than 5 minutes get a single progress update showing the current stage
-- The timer is cancelled on task completion (no stale edits)
-- Fast tasks (<5 min) never see a progress message
+### Security Invariant
 
-**Verify:** `pytest tests/test_handlers.py -k "progress" -v`
+- `importlib.import_module("config")` → BLOCKED (not in safe set, exposes API keys)
+- `importlib.import_module("dotenv")` → BLOCKED (not in safe set, reads .env files)
+- `importlib.import_module(module_name)` → BLOCKED (dynamic argument, can't verify)
+- `importlib.import_module("sys")` → ALLOWED
+- `importlib.import_module("os.path")` → ALLOWED (base module "os" is in safe set)
 
-**Estimated scope:** S (<15 lines)
+### Tests to Add
 
----
+```
+tests/test_sandbox.py:
+  test_importlib_allowed_for_sys()
+    — Code: 'import importlib; m = importlib.import_module("sys")' → no block
+  test_importlib_allowed_for_math()
+    — Code: 'import importlib; m = importlib.import_module("math")' → no block
+  test_importlib_blocked_for_config()
+    — Code: 'import importlib; m = importlib.import_module("config")' → BLOCKED
+  test_importlib_blocked_for_dotenv()
+    — Code: 'import importlib; m = importlib.import_module("dotenv")' → BLOCKED
+  test_importlib_blocked_for_dynamic_arg()
+    — Code: 'import importlib; m = importlib.import_module(user_input)' → BLOCKED
+  test_importlib_allowed_for_os_path()
+    — Code: 'import importlib; m = importlib.import_module("os.path")' → no block
+  test_importlib_blocked_for_requests()
+    — Code: 'import importlib; m = importlib.import_module("requests")' → BLOCKED (not in safe set; normal imports should be used)
+```
 
-## Items NOT in This Plan
+### Risk Notes
 
-These items from the report are excluded because they are operational/infra tasks (not code changes), already fixed, or out of scope:
-
-| Item | Reason Excluded |
-|------|----------------|
-| 1.1 Preview server `--bind 127.0.0.1` | Already fixed in current codebase (sandbox.py:115-116 shows the fix) |
-| 1.3 Code scanner bypass | Fixed v8.7.0 (AST constant folding + written-file scanning) |
-| 1.4 Firebase PATH | Ops task — fix PATH in launchd plist, not a code change |
-| 4.2 RAG context layer | Implemented v8.7.0 |
-| 4.5 Docker sandbox image | Ops task — run `./scripts/build_sandbox.sh` |
-| 3.3 Simple question fast path | Conflicts with invariant #1 (5-stage pipeline is fixed). Report §7 explicitly warns against this. |
-| 3.6 Cost monitoring/alerts | Low priority, no code change needed (existing `/cost` command works) |
-| Stop hook target fix | Trivial config change, not a code change: update `.claude/settings.json` to target `SESSION_LOG.md` |
-| 9.9 Retry loop learning | Report §9.9 lists this as a "Limitation Discovered", not a prioritized fix. Audit feedback goes to executor but not planner — planner re-plans from scratch. Fixing this requires threading audit feedback into the planner's prompt on retry, which changes the retry contract across 3 nodes. Significant scope for uncertain benefit (planner may still re-plan differently). Defer to v8.9.0 after Phase 0a eliminates the F-1 cascade that made this visible. |
-| Complexity ceiling (under-generation) | Not in the report's priority matrix. Test suite tests 16.1–16.3 expose this but the report only covers over-generation (§4.3, addressed in Phase 10). Under-generation (task exceeds single-generation capacity) is a fundamental model limitation, not a code fix. |
-
----
-
-## Test Suite Alignment Note
-
-`Ultimate_Test_Suite.md` labels tests 17.7–17.10 as `[NEW v8.7]` but their corresponding features are planned for v8.8.0:
-
-| Test | Label | Actual Status | Plan Phase |
-|------|-------|---------------|------------|
-| 17.7 (timeout progress) | [NEW v8.7] | **Not implemented** — will fail on v8.7.0 | Phase 13 |
-| 17.8 (path sanitisation) | [NEW v8.7] | Partially implemented — `/Users/` works, `/home/` doesn't | Phase 9 |
-| 17.9 (anti-fabrication) | [NEW v8.7] | Partially implemented — warning exists but is weak | Phase 2 |
-| 17.10 (credential filter) | [NEW v8.7] | Partially implemented — ghp_, AKIA work; Anthropic/Slack/Telegram don't | Phase 1 |
-
-**Action:** After v8.8.0 implementation, update `Ultimate_Test_Suite.md` to relabel these as `[NEW v8.8]` or `[UPDATED v8.8]`.
-
-**Pre-implementation verification for Phase 6:** Confirm that test 17.6 (chain `BLOCKED:` detection) passes on current v8.7.0 code. That test covers the *scanner-level* block case (where `BLOCKED:` is set in `execution_result`). Phase 6 fixes the *different* case: planner-level polite refusals that bypass all three gate conditions. Both cases need to work after Phase 6.
+- **False negative risk:** A module not in `_IMPORTLIB_SAFE_MODULES` that is legitimate will be blocked. Mitigation: the safe set covers all stdlib modules used in typical introspection tasks. Third-party modules should use normal `import` statements.
+- **Bypass risk:** Attacker uses `getattr(importlib, "import_module")("config")` — already blocked by `getattr(os)` pattern (line 446). But `getattr(importlib, ...)` is NOT blocked. Add a note to check this pattern in the next security audit.
 
 ---
 
-## Rollback Notes
+## Phase 4b: shutil.rmtree Scanner Hardening
 
-**If a phase breaks something:**
+**Fixes:** Test 3.1 scanner gap (code with destructive rm -rf reached execution)
+**Priority:** P1 | **Scope:** S (~25 lines) | **Risk:** Medium (security-sensitive)
+**Files:** `tools/sandbox.py`
 
-1. **Each phase is independently revertable.** Changes are scoped to 1–3 files per phase. `git revert` the phase's commit.
+### Problem
 
-2. **Phase 0a is the riskiest.** Shell scripts without shebangs (invoked via `bash script.sh`) will skip the if/fi truncation check. Mitigation: paren/bracket/brace/string checks still catch most truncation regardless of language. See "Known gap" note in Phase 0a.
+Test 3.1: `rm -rf ~/Documents` task resulted in PARTIAL — code was generated, passed the code scanner, and started execution before sandbox blocked the actual rm command. The code scanner should have caught the destructive operation before execution.
 
-3. **Phase 6 touches 3 files** (`brain/state.py`, `brain/nodes/planner.py`, `bot/handlers.py`). If the planner prefix-matching produces false positives on legitimate plans, revert the planner change and fall back to a simpler approach (e.g., check if `artifacts` is empty AND the task was a known-dangerous pattern).
+### Root Cause
 
-4. **Phase 8 has a required pre-implementation step.** Must reproduce the false positives before writing code. If reproduction shows the blocks are in the planner/auditor (not the code scanner), the fix changes entirely — prompt change instead of scanner change.
+`sandbox.py:431` — The shutil.rmtree pattern only catches literal path arguments:
+```python
+(re.compile(r"shutil\.rmtree\s*\(\s*['\"]?(/|~|Path\.home)", re.IGNORECASE), "recursive delete of home/root"),
+```
 
-5. **Phase 11 has a required pre-implementation step.** Must test LanceDB's actual `_distance` value for zero vectors before choosing the filtering approach. See test script in Phase 11.
+This misses:
+- `shutil.rmtree(os.path.expanduser("~/Documents"))` — path constructed via function call
+- `shutil.rmtree(target_dir)` — variable indirection
+- `shutil.rmtree(Path.home() / "Documents")` — Path object with division
 
-6. **Phase 2 is low-confidence.** Both changes are prompt-based. If fabrication persists after implementation, consider a structural fix in v8.9.0 (e.g., executor-level detection of "code that only prints text and creates no real output").
+### Changes
 
-7. **Pre-flight for every phase:** Run `just test-quick` before and after. If any existing test breaks, fix or revert before proceeding to the next phase.
+**tools/sandbox.py** — Add AST-based shutil.rmtree checker (after `_is_safe_importlib()`, before `_check_code_safety()`):
 
-8. **Commit strategy:** One commit per phase with conventional commit format (`fix:`, `feat:`). This allows clean `git revert` per phase.
+```python
+def _is_safe_shutil_rmtree(code: str) -> bool:
+    """True if ALL shutil.rmtree() calls use safe (non-home, non-root) targets.
+
+    Blocks:
+    - Any shutil.rmtree with a dynamic/variable argument (can't verify target)
+    - Any shutil.rmtree with a string literal starting with /, ~, or containing home
+    - Any shutil.rmtree with os.path.expanduser or Path.home() in the argument tree
+
+    Args:
+        code: Python source code to inspect.
+
+    Returns:
+        True if all calls are safe, False if any are unsafe or unparseable.
+    """
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return False
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        # Match shutil.rmtree(...)
+        if not (isinstance(func, ast.Attribute)
+                and func.attr == "rmtree"
+                and isinstance(func.value, ast.Name)
+                and func.value.id == "shutil"):
+            continue
+        if not node.args:
+            return False  # No argument — can't verify
+        first_arg = node.args[0]
+
+        # Block variable arguments (can't verify target at scan time)
+        if isinstance(first_arg, ast.Name):
+            return False
+
+        # Block string literals pointing to dangerous paths
+        if isinstance(first_arg, ast.Constant) and isinstance(first_arg.value, str):
+            path_val = first_arg.value.strip()
+            if path_val.startswith(("/", "~")) or "home" in path_val.lower():
+                return False
+            # Block current/parent directory wipes
+            if path_val in (".", "..") or path_val.startswith(".."):
+                return False
+
+        # Block any call expression as argument (expanduser, Path.home(), etc.)
+        # shutil.rmtree(some_function(...)) — can't verify what it returns
+        if isinstance(first_arg, ast.Call):
+            return False
+
+        # Block Path operations: Path.home() / "x", Path("/") / "x"
+        if isinstance(first_arg, ast.BinOp):
+            return False  # Path division — can't verify safely
+
+    return True
+```
+
+**tools/sandbox.py** — Integrate into `_check_code_safety()`:
+
+In the pattern loop section, after the existing regex-based shutil.rmtree check, add AST-based fallback:
+
+```python
+    # AST-based shutil.rmtree check — catches variable indirection and function calls
+    if "shutil" in code and "rmtree" in code:
+        if not _is_safe_shutil_rmtree(code):
+            return "BLOCKED: shutil.rmtree with unsafe or unverifiable target path"
+```
+
+### Security Invariant
+
+- `shutil.rmtree("/tmp/workspace/output")` → BLOCKED (starts with `/`)
+- `shutil.rmtree("./output")` → ALLOWED (relative path, within workspace)
+- `shutil.rmtree(".")` → BLOCKED (current directory wipe)
+- `shutil.rmtree("..")` → BLOCKED (parent directory wipe)
+- `shutil.rmtree("../sibling")` → BLOCKED (starts with `..`)
+- `shutil.rmtree(target_dir)` → BLOCKED (variable, can't verify)
+- `shutil.rmtree(os.path.expanduser("~/Documents"))` → BLOCKED (call expression)
+- `shutil.rmtree(Path.home() / "Documents")` → BLOCKED (BinOp)
+
+**Note:** The existing regex pattern at `sandbox.py:431` is preserved as the first line of defense for literal paths. The AST check is an addition that catches what the regex misses (variable indirection, function calls, `..` traversal). Both coexist — do NOT remove line 431.
+
+### Tests to Add
+
+```
+tests/test_sandbox.py:
+  test_rmtree_blocked_with_expanduser()
+    — Code: 'import shutil, os; shutil.rmtree(os.path.expanduser("~/Documents"))' → BLOCKED
+  test_rmtree_blocked_with_variable()
+    — Code: 'import shutil; target="/home/user"; shutil.rmtree(target)' → BLOCKED
+  test_rmtree_blocked_with_path_home()
+    — Code: 'import shutil; from pathlib import Path; shutil.rmtree(Path.home() / "docs")' → BLOCKED
+  test_rmtree_blocked_current_dir()
+    — Code: 'import shutil; shutil.rmtree(".")' → BLOCKED
+  test_rmtree_blocked_parent_traversal()
+    — Code: 'import shutil; shutil.rmtree("../other")' → BLOCKED
+  test_rmtree_allowed_relative_path()
+    — Code: 'import shutil; shutil.rmtree("./output")' → ALLOWED
+  test_rmtree_blocked_absolute_path()
+    — Code: 'import shutil; shutil.rmtree("/tmp/data")' → BLOCKED
+```
 
 ---
 
-*Plan ends here. No code changes have been made.*
+## Phase 5: Executor Respects `was_refused`
+
+**Fixes:** Test 4.1 planner/executor disconnect
+**Priority:** P1 | **Scope:** XS (~8 lines) | **Risk:** Low
+**Files:** `brain/nodes/executor.py`
+
+### Problem
+
+Test 4.1: planner said "I'll refuse this task" (`was_refused=True`), but the executor still generated and ran code (`while True: pass`). The sandbox timeout killed it, but code should never have been generated.
+
+### Root Cause
+
+`executor.py` does not check `state["was_refused"]` before generating code. The field was added in v8.8.0 but only used in `handlers.py` for chain refusal counting.
+
+### Changes
+
+**brain/nodes/executor.py** — Add early return at the top of `execute()` function:
+
+```python
+def execute(state: AgentState) -> dict:
+    """Execute the plan by generating and running code."""
+
+    # If planner refused the task, skip code generation and force immediate delivery.
+    # Set retry_count = MAX_RETRIES to prevent wasted audit-retry cycles.
+    # Without this, the auditor would see empty code → return verdict="fail"
+    # ("code doesn't address the request") → should_retry() loops back to plan
+    # → planner refuses again → 3 wasted cycles of ~60s each.
+    if state.get("was_refused"):
+        logger.info("Skipping execution — planner refused task %s", state["task_id"])
+        return {
+            "execution_result": "Task was refused by the planner on policy grounds. No code generated.",
+            "code": "",
+            "retry_count": config.MAX_RETRIES,  # Force skip to delivery
+        }
+
+    # ... rest of existing execute() logic
+```
+
+### Why `retry_count = MAX_RETRIES`
+
+The auditor has NO special handling for empty code or refused tasks. When executor returns `code=""` and `execution_result="Task was refused..."`:
+
+1. Auditor sends to Opus: plan says "refuse", code is empty, execution says refused
+2. Opus returns `verdict="fail"` ("code doesn't address the request")
+3. `should_retry()` sees fail + retry_count < MAX_RETRIES → loops back to plan
+4. Planner refuses again → executor skips again → auditor fails again
+5. After 3 cycles, MAX_RETRIES reached → delivers
+
+Setting `retry_count = MAX_RETRIES` in the executor's return short-circuits this loop. Same pattern used by `_detect_environment_error()` in `auditor.py:150`.
+
+**Alternative considered:** Add `was_refused` check to `should_retry()` → return "deliver". This works but is less clean — the executor already knows the task is refused and should signal "don't retry" at the source rather than relying on a downstream check.
+
+### Impact
+
+- Refused tasks skip code gen AND skip all retry cycles → straight to deliver
+- Saves 3 × ~60s = ~180s of wasted audit-retry cycles on refused tasks
+- Honest refusal message preserved in `execution_result` for deliverer
+
+### Tests to Add
+
+```
+tests/test_executor.py:
+  test_execute_skips_on_was_refused()
+    — state with was_refused=True → returns immediately, code="", retry_count=MAX_RETRIES
+  test_execute_proceeds_on_was_refused_false()
+    — state with was_refused=False → proceeds to code generation (mock Claude)
+```
+
+**Note:** A third test (`test_execute_refused_forces_delivery` — full pipeline integration) was considered but the key behaviour (`should_retry()` returning "deliver" when `retry_count >= MAX_RETRIES`) is already covered by `test_should_retry_still_respects_max_retries` in Phase 1. The two unit tests above are sufficient.
+
+---
+
+## Phase 6: Project Pipeline Arguments via YAML
+
+**Fixes:** F-8, G-8 (run_pipeline.py wrong arguments)
+**Priority:** P2 | **Scope:** M (~40 lines) | **Risk:** Low
+**Files:** `projects_macmini.yaml`, `tools/projects.py`, `brain/nodes/planner.py`
+
+### Problem
+
+Tests 7.2a/7.2b/14.3: planner generated `python3 run_pipeline.py` without required `--client` flag. RAG returned code chunks but not the CLI interface spec. All 3 attempts failed with the same usage error.
+
+### Root Cause
+
+`projects_macmini.yaml` defines commands but not their required arguments. The planner generates plausible invocations by guessing from code context.
+
+### Changes
+
+**projects_macmini.yaml** — Add `run_instructions` field to projects with CLI interfaces:
+
+```yaml
+  - name: "iGaming Intelligence Dashboard"
+    path: "/Users/agentruntime1/Desktop/igaming-intelligence-dashboard"
+    description: |
+      Competitive intelligence dashboard for the iGaming industry.
+      NER pipeline, Gemini enrichment, Streamlit frontend.
+    commands:
+      run: "cd {path} && source venv/bin/activate && python run_pipeline.py"
+    run_instructions: |
+      IMPORTANT: run_pipeline.py REQUIRES at least one argument — it errors without args.
+      Usage: python run_pipeline.py --full-pipeline | --update-only | --scrape-only
+      --full-pipeline: scrape + enrich + deploy (use this for "run the pipeline")
+      --update-only: re-enrich existing data without scraping
+      --scrape-only: scrape without enrichment or deploy
+      ALWAYS pass an explicit flag. Never call run_pipeline.py without arguments.
+      NOTE: Verify actual CLI interface via `python run_pipeline.py --help` on
+      Mac Mini before deploying this config — the flags above are inferred from
+      test failure logs (Tests 7.2a/b: "the following arguments are required")
+      and may not match the current CLI exactly.
+    timeout: 300
+    triggers:
+      - "igaming"
+      - "igaming intelligence"
+      # ... existing triggers
+```
+
+**tools/projects.py** — Include `run_instructions` in `get_project_context()` (modify lines 73–91):
+
+```python
+def get_project_context(project: dict) -> str:
+    """Format a single project's context for injection into prompts."""
+    parts = [
+        f"Project: {project['name']}",
+        f"Path: {project['path']}",
+        f"Description: {project.get('description', 'N/A')}",
+    ]
+    if project.get("commands"):
+        cmds = "\n".join(f"  {k}: {v}" for k, v in project["commands"].items())
+        parts.append(f"Commands:\n{cmds}")
+    if project.get("run_instructions"):
+        parts.append(f"Run Instructions:\n{project['run_instructions']}")
+    if project.get("timeout"):
+        parts.append(f"Timeout: {project['timeout']}s")
+    return "\n".join(parts)
+```
+
+### Tests to Add
+
+```
+tests/test_projects.py:
+  test_project_context_includes_run_instructions()
+    — Project with run_instructions → context string contains "Run Instructions:"
+  test_project_context_without_run_instructions()
+    — Project without run_instructions → context string does not contain "Run Instructions:"
+```
+
+### Verification
+
+Run Test 7.2 equivalent: "Run the igaming competitor intelligence dashboard." Confirm planner output includes `--full-pipeline` flag.
+
+---
+
+## Phase 7: Task-Type-Specific Audit Criteria Expansion
+
+**Fixes:** Audit versatility improvement (addresses limitations 7, partially 5)
+**Priority:** P2 | **Scope:** S (~30 lines) | **Risk:** Low
+**Files:** `brain/nodes/auditor.py`
+
+### Problem
+
+The auditor uses one-size-fits-all criteria for each task type. Data tasks don't get math checks (Phase 2 adds them to the base prompt, but criteria-level specificity would reinforce). Frontend tasks don't get completeness checks beyond HTML structure.
+
+### Changes
+
+**auditor.py** — Expand `AUDIT_CRITERIA["frontend"]` (lines 115–125):
+
+```python
+    "frontend": """
+Evaluate:
+1. Was an HTML file generated?
+2. Does the HTML contain proper structure (<!DOCTYPE html>, <html>, <head>, <body>, </html>)?
+3. Does it include Tailwind CSS (CDN link present)?
+4. For React apps: are React, ReactDOM, and Babel CDN scripts included?
+5. Does it implement the requested features (components, interactivity, data display)?
+6. Is it self-contained (no broken external dependencies, all via CDN)?
+7. Is it responsive (mobile-first breakpoints)?
+8. Is the HTML COMPLETE? Check that </html> is present at the end. If the code ends mid-tag or mid-script, FAIL with "code appears truncated".
+9. Are all <script> blocks closed with </script>? Are all <style> blocks closed with </style>?
+
+FAIL if: no HTML file generated, broken HTML structure, missing Tailwind/React CDN, doesn't implement requested features, code appears truncated (missing </html>).""",
+```
+
+**auditor.py** — Expand `AUDIT_CRITERIA["data"]` (lines 64–72, reinforcing Phase 2):
+
+```python
+    "data": """
+Evaluate:
+1. Does the analysis correctly address the user's question?
+2. Did execution succeed (exit code 0)?
+3. Did all data validation assertions pass? Look for "ALL ASSERTIONS PASSED".
+4. Were output files (charts, CSVs) generated?
+5. Are there tracebacks or errors?
+6. DATA INTEGRITY: Are percentages between 0–100%? Are counts non-negative? If impressions=0, are clicks also 0? If a rate exceeds 1000%, flag as likely column misalignment.
+7. Does the output contain the ACTUAL data requested, not sample/mock/placeholder data?
+
+FAIL if: non-zero exit code, assertion failures, no output files when expected, traceback present, mathematically impossible values, sample data substituted for real data.""",
+```
+
+**auditor.py** — Add `AUDIT_CRITERIA["project"]` enhancement for pipeline tasks (lines 74–85):
+
+```python
+    "project": """
+Evaluate:
+1. Did the project command execute successfully (exit code 0)?
+2. Were the correct parameters extracted and used (check the command for proper client name, file paths, flags)?
+3. Did the command produce expected output files?
+4. Is the stdout output meaningful (not empty or error-only)?
+5. Were there any errors or warnings that indicate failure?
+6. Did the command use the CORRECT arguments as specified in the project's run_instructions?
+7. If the task involves data processing: are output metrics plausible (no impossible percentages, no zero-denominator rates)?
+
+NOTE: Project commands do NOT use Python assert statements. Do NOT look for "ALL ASSERTIONS PASSED".
+Instead, check: exit code 0, expected files created, meaningful output in stdout, correct arguments used.
+
+FAIL if: non-zero exit code, wrong parameters used, no output files when expected, error messages in output, impossible data values in output.""",
+```
+
+### Tests to Add
+
+```
+tests/test_auditor.py:
+  test_frontend_audit_detects_truncated_html()
+    — Mock execution with HTML missing </html> → assert verdict="fail"
+  test_data_audit_detects_impossible_rate()
+    — Mock execution with "CTR: 11600%" → assert verdict="fail"
+  test_project_audit_checks_correct_arguments()
+    — Mock execution with wrong pipeline args → assert verdict="fail"
+```
+
+---
+
+## Phase 8: ARCHITECTURE.md Per-Project Convention
+
+**Fixes:** Context evaporation limitation, G-8 (CLI argument handling), planning quality
+**Priority:** P2 | **Scope:** M (~50 lines code + convention doc) | **Risk:** Low
+**Files:** `brain/nodes/planner.py`, `tools/projects.py`
+
+### Problem
+
+The planner's project context comes from three sources: YAML triggers (shallow), project_memory (50 FIFO rows, pattern-focused), RAG chunks (fragmented code). None provide architectural overview: tech stack, directory structure, key entry points, CLI interfaces. This gap causes wrong invocations (Tests 7.2a/b), wrong routing (Test 10.1), and slow planning (no context → longer reasoning).
+
+### Convention
+
+Each registered project gets an `ARCHITECTURE.md` in its root directory:
+
+```markdown
+# {Project Name} — Architecture
+
+## Tech Stack
+- Python 3.11, FastAPI, Supabase
+- Deployed via GitHub Actions
+
+## Directory Structure
+src/
+  api/         → FastAPI routes
+  services/    → Business logic
+  models/      → Pydantic schemas
+tests/         → pytest
+
+## Key Entry Points
+- `run_pipeline.py` → Main CLI. Usage: `python run_pipeline.py [--full-pipeline|--update-only]`
+- `src/main.py` → FastAPI app entry
+
+## Important Patterns
+- All config via .env (never hardcode)
+- Async database access via asyncpg
+
+## Known Gotchas
+- Pipeline requires `--full-pipeline` flag for complete run
+- Streamlit app must be started separately
+```
+
+**Maximum 200 lines.** Human-maintained (agent suggests updates, human approves).
+
+### Changes
+
+**brain/nodes/planner.py** — Read ARCHITECTURE.md before RAG injection (insert before line 227):
+
+```python
+    # Inject project ARCHITECTURE.md if it exists (read before RAG for structural context)
+    if task_type == "project" and state.get("project_config", {}).get("path"):
+        arch_path = Path(state["project_config"]["path"]) / "ARCHITECTURE.md"
+        if arch_path.is_file():
+            try:
+                arch_content = arch_path.read_text(encoding="utf-8", errors="replace")[:5000]
+                system += f"\n\nPROJECT ARCHITECTURE ({state.get('project_name', 'unknown')}):\n{arch_content}"
+                logger.info("Injected ARCHITECTURE.md for %s (%d chars)", state.get("project_name"), len(arch_content))
+            except OSError as e:
+                logger.warning("Failed to read ARCHITECTURE.md: %s", e)
+```
+
+**brain/nodes/deliverer.py** — After successful project task, suggest ARCHITECTURE.md update (append to final_response if project task passed):
+
+```python
+    # Suggest ARCHITECTURE.md update for successful project tasks
+    if state.get("task_type") == "project" and state.get("audit_verdict") == "pass":
+        project_path = state.get("project_config", {}).get("path", "")
+        arch_path = Path(project_path) / "ARCHITECTURE.md" if project_path else None
+        if arch_path and not arch_path.is_file():
+            # Only mention if ARCHITECTURE.md doesn't exist yet
+            response += "\n\n_Tip: This project has no ARCHITECTURE.md yet. Consider creating one to improve future task planning._"
+```
+
+### What NOT to Do
+
+- Do NOT auto-write ARCHITECTURE.md — agent suggestions only, human approves
+- Do NOT block on missing ARCHITECTURE.md — graceful degradation (just skip)
+- Do NOT inject for non-project tasks — only `task_type == "project"`
+
+### Tests to Add
+
+```
+tests/test_planner.py:
+  test_architecture_md_injected_when_present()
+    — Create temp ARCHITECTURE.md → plan() system prompt contains "PROJECT ARCHITECTURE"
+  test_architecture_md_skipped_when_missing()
+    — No ARCHITECTURE.md → plan() system prompt does not contain "PROJECT ARCHITECTURE"
+  test_architecture_md_capped_at_5000_chars()
+    — Create 10K char ARCHITECTURE.md → injected content is ≤5000 chars
+```
+
+---
+
+## Phase 9: Ollama Health Monitoring
+
+**Fixes:** G-9 (111 empty responses undetected until log analysis)
+**Priority:** P2 | **Scope:** S (~30 lines) | **Risk:** Low
+**Files:** `tools/model_router.py`, `bot/handlers.py`
+
+### Problem
+
+111 Ollama empty responses during the 10hr test run, each burning 4–6s before Claude escalation. No visibility into this without manually grepping logs. The `/health` command shows pipeline stage averages but not Ollama reliability metrics.
+
+### Changes
+
+**tools/model_router.py** — Add module-level stats dict (after line 22):
+
+Uses a mutable dict (consistent with the `_client = None` singleton pattern used elsewhere in the codebase) instead of `global` declarations:
+
+```python
+# Ollama reliability counters (reset on process restart)
+_ollama_stats = {
+    "calls": 0,
+    "empty_responses": 0,
+    "errors": 0,
+    "fallbacks_to_claude": 0,
+}
+```
+
+Update `route_and_call()` (in the Ollama call block, ~lines 40–53):
+
+```python
+    if provider == "ollama":
+        for attempt in range(2):
+            _ollama_stats["calls"] += 1
+            try:
+                result = _call_ollama(prompt, system=system, model=model, max_tokens=max_tokens)
+                if result and result.strip():
+                    return result
+                _ollama_stats["empty_responses"] += 1
+                logger.warning("Ollama returned empty (attempt %d/2)", attempt + 1)
+                # ... existing retry logic
+            except Exception as e:
+                _ollama_stats["errors"] += 1
+                # ... existing error handling
+        # Fallback to Claude
+        _ollama_stats["fallbacks_to_claude"] += 1
+        # ... existing fallback logic
+```
+
+Add getter function:
+
+```python
+def get_ollama_stats() -> dict:
+    """Return Ollama reliability counters for /health display."""
+    total = _ollama_stats["calls"]
+    failures = _ollama_stats["empty_responses"] + _ollama_stats["errors"]
+    return {
+        **_ollama_stats,
+        "reliability_pct": round((1 - failures / max(total, 1)) * 100, 1),
+    }
+```
+
+**bot/handlers.py** — Add Ollama stats to `/health` output:
+
+```python
+    # In the /health handler, after existing pipeline stats:
+    from tools.model_router import get_ollama_stats
+    ollama = get_ollama_stats()
+    if ollama["calls"] > 0:
+        health_text += (
+            f"\n\n**Ollama Reliability:**\n"
+            f"Calls: {ollama['calls']} | Empty: {ollama['empty_responses']} | "
+            f"Errors: {ollama['errors']} | Claude fallbacks: {ollama['fallbacks_to_claude']}\n"
+            f"Reliability: {ollama['reliability_pct']}%"
+        )
+```
+
+### Tests to Add
+
+```
+tests/test_model_router.py:
+  test_ollama_stats_increment_on_empty()
+    — Mock Ollama returning empty → stats["empty_responses"] == 1
+  test_ollama_stats_increment_on_fallback()
+    — Mock Ollama failing → stats["fallbacks_to_claude"] == 1
+  test_ollama_reliability_calculation()
+    — Set counters manually → verify percentage calculation
+```
+
+---
+
+## Test Coverage Summary
+
+| Phase | New Tests | Estimated LOC |
+|-------|-----------|---------------|
+| 0a | 4 | ~40 |
+| 0b | 5 | ~50 |
+| 0c | 0 | 0 |
+| 0d | 3 | ~30 |
+| 1 | 4 | ~40 |
+| 2 | 3 | ~30 |
+| 3 | 6 | ~60 |
+| 4 | 7 | ~70 |
+| 4b | 7 | ~70 |
+| 5 | 2 | ~20 |
+| 6 | 2 | ~20 |
+| 7 | 3 | ~30 |
+| 8 | 3 | ~30 |
+| 9 | 3 | ~30 |
+| **Total** | **52** | **~520** |
+
+---
+
+## Rollout Strategy
+
+### Phase 0 (P0) — Deploy together, test immediately
+
+1. Pull `qwen2.5:7b` on Mac Mini: `ollama pull qwen2.5:7b`
+2. Deploy all Phase 0 changes in one commit
+3. Run 10 classification tasks, verify latency <15s in logs
+4. Run Test 10.1 equivalent (portfolio page), verify no project over-matching
+5. Run a long task (Test 12.1 equivalent), verify no 900s timeout
+
+### Phases 1–5 (P1) — Deploy sequentially, test each
+
+Each phase gets its own commit. Run the relevant test from the Ultimate Test Suite after each:
+- Phase 1: Run Tests 7.2a/7.2b → verify early exit on duplicate error
+- Phase 2: Create mock data report with impossible metrics → verify audit catches it
+- Phase 3: Run Test 8.3 equivalent → verify HTML truncation detected
+- Phase 4: Run Test 15.1 → verify importlib allowed for sys.builtin_module_names
+- Phase 4b: Run Test 3.1 equivalent → verify shutil.rmtree with variable/expanduser blocked before execution
+- Phase 5: Run Test 4.1 → verify no code generated for refused task, no retry cycles wasted
+
+### Phases 6–9 (P2) — Deploy in parallel, test in next full test suite run
+
+These phases improve quality but don't fix blockers. Include in the next full test suite execution.
+
+---
+
+## Mapping: Limitation → Phase
+
+| Limitation | Root Cause | Fix Phase(s) |
+|------------|-----------|-------------|
+| 1. Planning bottleneck (65–380s) | Ollama model overhead, complexity routing too conservative, no early-exit on repeats | 0a, 0d, 1 |
+| 2. Classifier over-matching | Naive substring trigger matching | 0b |
+| 3. Ollama 30–55s classification | deepseek-r1:14b `<think>` overhead, 9GB RAM | 0a |
+| 4. importlib false positive | Regex blocks all importlib, no argument inspection | 4 |
+| 5. HTML truncation undetected | Detector only checks Python/shell constructs | 3, 7 |
+| 6. Wrong pipeline arguments | Planner doesn't know CLI interfaces | 6, 8 |
+| 7. Audit misses impossible data | No data sanity instructions in audit prompt | 2, 7 |
+| 8. shutil.rmtree scanner gap | Regex only catches literal paths, misses variable/function indirection | 4b |
+
+## Mapping: Evolution Roadmap → Phase
+
+| Roadmap Item | Phase |
+|-------------|-------|
+| F-1: Switch classify to qwen2.5:7b | 0a |
+| F-2: Classifier trigger context-awareness | 0b |
+| F-3: Duplicate error detection | 1 |
+| F-4: Audit data sanity | 2 |
+| F-5: HTML truncation detection | 3 |
+| F-6: LONG_TIMEOUT increase | 0c |
+| F-7: importlib smart allowlist | 4 |
+| F-8: Project pipeline arguments | 6 |
+| Refine plan complexity routing | 0d |
+| ARCHITECTURE.md per project | 8 |
+| Task-type-specific audit criteria | 7 |
+| Purpose-dependent Ollama routing | 0a |
+| Ollama health monitoring | 9 |
+| Executor respects was_refused | 5 |
+| shutil.rmtree scanner hardening | 4b |
+
+---
+
+## Files Changed Summary
+
+| File | Phases | Lines Changed (est.) |
+|------|--------|---------------------|
+| `config.py` | 0a, 0c | ~5 |
+| `tools/model_router.py` | 0a, 9 | ~60 |
+| `tools/projects.py` | 0b, 6 | ~40 |
+| `brain/nodes/classifier.py` | — | 0 (no changes needed) |
+| `brain/nodes/planner.py` | 0d, 8 | ~25 |
+| `brain/nodes/executor.py` | 3, 5 | ~30 |
+| `brain/nodes/auditor.py` | 2, 7 | ~50 |
+| `brain/nodes/deliverer.py` | 8 | ~10 |
+| `brain/graph.py` | 1 | ~20 |
+| `brain/state.py` | 1 | ~2 |
+| `tools/sandbox.py` | 4, 4b | ~85 |
+| `bot/handlers.py` | 9 | ~10 |
+| `projects_macmini.yaml` | 6 | ~20 |
+| **Total** | | **~360 source + ~520 test = ~880** |

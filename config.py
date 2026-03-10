@@ -75,7 +75,7 @@ COMPLEX_MODEL = os.getenv("COMPLEX_MODEL", "claude-opus-4-6")
 # Execution limits
 EXECUTION_TIMEOUT = _safe_int("EXECUTION_TIMEOUT", 120)       # Single code execution
 MAX_CODE_EXECUTION_TIMEOUT = _safe_int("MAX_CODE_EXECUTION_TIMEOUT", 600)  # Hard cap
-LONG_TIMEOUT = _safe_int("LONG_TIMEOUT", 900)                 # Full pipeline timeout (interactive + scheduled)
+LONG_TIMEOUT = _safe_int("LONG_TIMEOUT", 1800)                # Full pipeline timeout (interactive + scheduled)
 
 # Retry limits
 MAX_RETRIES = _safe_int("MAX_RETRIES", 3)           # Pipeline audit-retry limit
@@ -88,6 +88,7 @@ MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 # Ollama configuration
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_DEFAULT_MODEL = os.getenv("OLLAMA_DEFAULT_MODEL", "deepseek-r1:14b")
+OLLAMA_CLASSIFY_MODEL = os.getenv("OLLAMA_CLASSIFY_MODEL", "qwen2.5:7b")
 
 # Data processing thresholds
 BIG_DATA_ROW_THRESHOLD = _safe_int("BIG_DATA_ROW_THRESHOLD", 500)

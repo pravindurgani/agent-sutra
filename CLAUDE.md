@@ -3,7 +3,7 @@
 Single-user, self-hosted AI agent. Telegram-controlled. Mac Mini M2 (16GB).
 Fixed 5-stage LangGraph pipeline: Classify → Plan → Execute → Audit → Deliver.
 Cross-model adversarial auditing: Sonnet generates, Opus reviews.
-~7,876 LOC across 21 source files. ~10,808 LOC tests across 27 files. 782 test functions (771 passing, 11 skipped).
+~7,876 LOC across 21 source files. ~11,000 LOC tests across 28 files. 796 test functions (760 passing, 36 skipped).
 
 ## Architecture
 
@@ -19,7 +19,7 @@ Cross-model adversarial auditing: Sonnet generates, Opus reviews.
 | File | Lines | Purpose |
 |------|------:|---------|
 | `main.py` | 240 | Entry point: env validation, DB init, crash recovery, Ollama startup test, SIGTERM handler, bot start |
-| `config.py` | 143 | All constants, paths, model names, timeouts, budget caps, crash-safe env parsing, RAG config |
+| `config.py` | 144 | All constants, paths, model names, timeouts, budget caps, crash-safe env parsing, RAG config |
 | `brain/state.py` | 61 | `AgentState` TypedDict — 24 fields flowing through pipeline |
 | `brain/graph.py` | 151 | LangGraph wiring, `run_task()`, stage tracking, node timing, task completion summary |
 | `brain/nodes/classifier.py` | 99 | Fast path (trigger match) → slow path (Claude/Ollama classify), word-boundary fallback |
@@ -29,12 +29,12 @@ Cross-model adversarial auditing: Sonnet generates, Opus reviews.
 | `brain/nodes/deliverer.py` | 430 | Response formatting, memory extraction, temporal mining, debug sidecar, credential filter (expanded), path sanitisation (Linux+macOS) |
 | `tools/sandbox.py` | 1559 | Execution sandbox: AST scanner, smart subprocess, written-file scanning, Docker, streaming, server mgmt |
 | `tools/rag.py` | 324 | RAG context layer: LanceDB index, Ollama embeddings, AST-based Python chunking, query/build, zero-vector filtering |
-| `tools/model_router.py` | 222 | Claude/Ollama routing by purpose, complexity, RAM, budget, empty response retry, unclosed think-block handling |
+| `tools/model_router.py` | 224 | Claude/Ollama routing by purpose, complexity, RAM, budget, empty response retry, unclosed think-block handling |
 | `tools/claude_client.py` | 425 | Anthropic API wrapper: retries, cost tracking, streaming, midnight-based budget, daily breakdown, budget remaining |
 | `tools/file_manager.py` | 157 | Upload handling, metadata extraction, content reading, JSON size cap |
 | `tools/deployer.py` | 235 | Static deployment: GitHub Pages, Vercel, Firebase, credential-safe subprocess |
 | `tools/visual_check.py` | 90 | Playwright headless Chromium: page load, console errors, screenshot, SSRF guard |
-| `tools/projects.py` | 104 | Project registry loader, trigger matcher, word-boundary regex |
+| `tools/projects.py` | 125 | Project registry loader, trigger matcher, word-boundary regex, mention-context exclusion |
 | `storage/db.py` | 468 | SQLite ops: async (bot) + sync (pipeline), 5 tables, WAL mode, history FIFO cap, partial state persistence |
 | `scheduler/cron.py` | 67 | APScheduler with SQLite persistence, prefix-length validation |
 | `bot/telegram_bot.py` | 69 | Bot factory, 19 command registrations |
@@ -45,7 +45,7 @@ Cross-model adversarial auditing: Sonnet generates, Opus reviews.
 | Stage | Model | Router? | Key Function | Output |
 |-------|-------|:---:|--------------|--------|
 | Classify | Sonnet or Ollama | Yes (`complexity="low"`) | `classify()` | `task_type`, `project_name` |
-| Plan | Sonnet or Ollama | Yes (project=low, others=high) | `plan()` | `plan` string |
+| Plan | Sonnet or Ollama | Yes (frontend/ui/data=high, others=low) | `plan()` | `plan` string |
 | Plan (file select) | Ollama embed or Sonnet | No | `_inject_project_files()` | RAG chunks or selected files in prompt |
 | Execute (params) | Sonnet | No | `_extract_params()` | `extracted_params` |
 | Execute (code gen) | Sonnet | No | `_generate_code()` | `code` |
@@ -105,12 +105,13 @@ Cross-model adversarial auditing: Sonnet generates, Opus reviews.
 | `COMPLEX_MODEL` | `claude-opus-4-6` | Audit (adversarial review) |
 | `EXECUTION_TIMEOUT` | 120s | Single code execution |
 | `MAX_CODE_EXECUTION_TIMEOUT` | 600s | Hard cap on execution |
-| `LONG_TIMEOUT` | 900s | Full pipeline timeout |
+| `LONG_TIMEOUT` | 1800s | Full pipeline timeout |
 | `MAX_RETRIES` | 3 | Audit-retry cycles |
 | `MAX_CONCURRENT_TASKS` | 3 | Parallel pipeline limit |
 | `RAM_THRESHOLD_PERCENT` | 90 | Reject tasks above this |
 | `MAX_FILE_INJECT_COUNT` | 50 | Max project files for dynamic injection |
-| `OLLAMA_DEFAULT_MODEL` | `deepseek-r1:14b` | Local model for low-complexity offload |
+| `OLLAMA_DEFAULT_MODEL` | `deepseek-r1:14b` | Local model for planning offload |
+| `OLLAMA_CLASSIFY_MODEL` | `qwen2.5:7b` | Local model for classification (lighter, faster) |
 | `SERVER_START_TIMEOUT` | 30s | Max wait for server HTTP response |
 | `SERVER_MAX_LIFETIME` | 300s | Auto-kill servers after this |
 | `SERVER_PORT_RANGE_START` | 8100 | Port range for dev servers |
@@ -133,7 +134,7 @@ Cross-model adversarial auditing: Sonnet generates, Opus reviews.
 
 **Required:** `ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`, `ALLOWED_USER_IDS`
 **Optional:** `DAILY_BUDGET_USD`, `MONTHLY_BUDGET_USD`, `DOCKER_ENABLED`, `DOCKER_NETWORK`,
-`OLLAMA_BASE_URL`, `OLLAMA_DEFAULT_MODEL`, `EXECUTION_TIMEOUT`, `MAX_CONCURRENT_TASKS`,
+`OLLAMA_BASE_URL`, `OLLAMA_DEFAULT_MODEL`, `OLLAMA_CLASSIFY_MODEL`, `EXECUTION_TIMEOUT`, `MAX_CONCURRENT_TASKS`,
 `DEPLOY_ENABLED`, `DEPLOY_PROVIDER`, `DEPLOY_FIREBASE_PROJECT`, `DEPLOY_FIREBASE_TOKEN`,
 `ENABLE_THINKING`, `DEFAULT_MODEL`, `COMPLEX_MODEL`, `RAG_ENABLED`, `RAG_EMBED_MODEL`
 
@@ -172,7 +173,7 @@ Dev machine uses `projects.yaml` with different local paths.
 ```bash
 just test-quick                           # skip Docker, stop on first failure
 just test-security                        # security-critical tests only
-pytest tests/ -v                          # all 782 tests (771 pass, 11 skip)
+pytest tests/ -v                          # all 796 tests (760 pass, 36 skip)
 pytest tests/ -v -k "not docker"          # skip Docker-required tests
 pytest tests/test_sandbox.py -v           # sandbox + AST scanner + written-file scanning
 pytest tests/test_rag.py -v              # RAG context layer (22 tests)

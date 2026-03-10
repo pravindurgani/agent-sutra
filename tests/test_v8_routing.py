@@ -80,7 +80,7 @@ class TestModelRouterSelection:
             provider, model = _select_model("classify", "low")
 
         assert provider == "ollama"
-        assert model == config.OLLAMA_DEFAULT_MODEL
+        assert model == config.OLLAMA_CLASSIFY_MODEL
 
     def test_classify_low_no_ollama_falls_back(self):
         """Rule (c): Ollama not available → falls back to Claude Sonnet."""
@@ -125,7 +125,7 @@ class TestModelRouterSelection:
             provider, model = _select_model("classify", "low")
 
         assert provider == "ollama"
-        assert model == config.OLLAMA_DEFAULT_MODEL
+        assert model == config.OLLAMA_CLASSIFY_MODEL
 
     def test_budget_escalation_no_budget_set(self):
         """Rule (d): DAILY_BUDGET_USD=0 (unlimited) → never escalates."""

@@ -430,3 +430,53 @@ class TestPlannerRefusalDetection:
         }
         result = plan(state)
         assert result["was_refused"] is False
+
+
+# ── Phase 0d: Plan complexity routing ──────────────────────────────
+
+
+class TestPlanComplexityRouting:
+    """Plan complexity must be 'high' only for frontend/ui_design/data tasks."""
+
+    @patch("brain.nodes.planner.route_and_call", return_value="1. Write code\n2. Run it")
+    def test_plan_complexity_code_is_low(self, mock_route: object) -> None:
+        """code tasks plan with complexity='low'."""
+        from brain.nodes.planner import plan
+        state = {
+            "task_id": "test-code", "user_id": 1, "message": "Write hello world",
+            "files": [], "task_type": "code", "project_name": "",
+            "project_config": {}, "audit_feedback": "", "execution_result": "",
+            "conversation_context": "",
+        }
+        plan(state)
+        assert mock_route.call_args[1]["complexity"] == "low"
+
+    @patch("brain.nodes.planner.route_and_call", return_value="1. Build layout\n2. Style it")
+    def test_plan_complexity_frontend_is_high(self, mock_route: object) -> None:
+        """frontend tasks plan with complexity='high'."""
+        from brain.nodes.planner import plan
+        state = {
+            "task_id": "test-fe", "user_id": 1, "message": "Build a landing page",
+            "files": [], "task_type": "frontend", "project_name": "",
+            "project_config": {}, "audit_feedback": "", "execution_result": "",
+            "conversation_context": "",
+        }
+        plan(state)
+        assert mock_route.call_args[1]["complexity"] == "high"
+
+    @patch("brain.nodes.planner.route_and_call", return_value="1. Run command\n2. Check output")
+    @patch("brain.nodes.planner.sync_query_project_memories", return_value=[])
+    def test_plan_complexity_project_is_low(self, _mock_mem: object, mock_route: object) -> None:
+        """project tasks plan with complexity='low'."""
+        from brain.nodes.planner import plan
+        state = {
+            "task_id": "test-proj", "user_id": 1, "message": "Run the scraper",
+            "files": [], "task_type": "project", "project_name": "test-proj",
+            "project_config": {
+                "name": "test-proj", "path": "/tmp/test",
+                "commands": {"run": "python3 main.py"},
+            },
+            "audit_feedback": "", "execution_result": "", "conversation_context": "",
+        }
+        plan(state)
+        assert mock_route.call_args[1]["complexity"] == "low"
